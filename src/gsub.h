@@ -81,12 +81,39 @@ typedef struct packed_BE {
   // uint16_t markFilteringSet;
 } LookupTable;
 
+/** Coverage **/
+typedef struct packed_BE {
+  uint16_t coverageFormat;
+  uint16_t count;
+  uint16_t array;
+} CoverageTable;
+
+typedef struct packed_BE {
+  uint16_t coverageFormat;
+  uint16_t glyphCount;
+  uint16_t glyphArray[];
+} CoverageArrayTable;
+
+typedef struct packed_BE {
+  uint16_t startGlyphID;
+  uint16_t endGlyphID;
+  uint16_t startCoverageIndex;
+} CoverageRangeRecordTable;
+
+typedef struct packed_BE {
+  uint16_t coverageFormat;
+  uint16_t rangeCount;
+  CoverageRangeRecordTable rangeRecords[];
+} CoverageRangesTable;
+
+
 /** Generic Substitution Table **/
 typedef struct packed_BE {
   uint16_t substFormat;
 } GenericSubstTable;
 
-/** Single Substitution Format **/
+
+/** Single Substitution Format - Type 1 **/
 typedef struct packed_BE {
   uint16_t substFormat;
   uint16_t coverageOffset;
@@ -105,7 +132,8 @@ typedef struct packed_BE {
   int16_t substituteGlyphIDs[];
 } SingleSubstFormat2;
 
-/** Multiple Substitution Format **/
+
+/** Multiple Substitution Format - Type 2 **/
 typedef struct packed_BE {
   uint16_t substFormat;
   uint16_t coverageOffset;
@@ -118,48 +146,111 @@ typedef struct packed_BE {
   uint16_t substituteGlyphIDs[];
 } SequenceTable;
 
-/** Ligature Substitution Format **/
+
+/** Ligature Substitution Format - Type 4 **/
 typedef struct packed_BE {
   uint16_t substFormat; // Set to 1 maybe?
   uint16_t coverageOffset;
   uint16_t ligatureSetCount;
   uint16_t ligatureSetOffsets[];
 } LigatureSubstitutionTable;
-typedef struct packed_BE {
-  uint16_t coverageFormat;
-  uint16_t count;
-  uint16_t array;
-} CoverageTable;
-typedef struct packed_BE {
-  uint16_t coverageFormat;
-  uint16_t glyphCount;
-  uint16_t glyphArray[];
-} CoverageArrayTable;
-typedef struct packed_BE {
-  uint16_t startGlyphID;
-  uint16_t endGlyphID;
-  uint16_t startCoverageIndex;
-} CoverageRangeRecordTable;
-typedef struct packed_BE {
-  uint16_t coverageFormat;
-  uint16_t rangeCount;
-  CoverageRangeRecordTable rangeRecords[];
-} CoverageRangesTable;
+
 typedef struct packed_BE {
   uint16_t ligatureCount;
   uint16_t ligatureOffsets[];
 } LigatureSetTable;
+
 typedef struct packed_BE {
   uint16_t ligatureGlyph;
   uint16_t componentCount;
   uint16_t componentGlyphIDs[];
 } LigatureTable;
 
+/** Sequence **/
+typedef struct packed_BE {
+  uint16_t sequenceIndex;
+  uint16_t lookupListIndex;
+} SequenceLookupRecord;
+
+
+/** Chained Sequence Context Format - Type 6 **/
+typedef struct packed_BE {
+  uint16_t format;
+} GenericChainedSequenceContextFormat;
+
+typedef struct packed_BE {
+  uint16_t format;
+  uint16_t coverageOffset;
+  uint16_t chainedSeqRuleSetCount;
+  uint16_t chainedSeqRuleSetOffsets[];
+} ChainedSequenceContextFormat1;
+
+typedef struct packed_BE {
+  uint16_t chainedSeqRuleCount;
+  uint16_t chainedSeqRuleOffsets;
+} ChainedSequenceRuleSet;
+
+typedef struct packed_BE {
+  uint16_t backtrackGlyphCount;
+  uint16_t backtrackSequence[];
+  // uint16_t inputGlyphCount;
+  // uint16_t inputSequence[];
+  // uint16_t lookaheadGlyphCount;
+  // uint16_t lookaheadSequence[];
+  // uint16_t seqLookupCount;
+  // SequenceLookupRecord seqLookupRecords[];
+} ChainedSequenceRule;
+
+
+
+typedef struct packed_BE {
+  uint16_t format;
+  uint16_t backtrackGlyphCount;
+  uint16_t backtrackCoverageOffsets[];
+  // uint16_t inputGlyphCount;
+  // uint16_t inputCoverageOffsets;
+  // uint16_t lookaheadGlyphCount;
+  // uint16_t lookaheadCoverageOffsets;
+  // uint16_t seqLookupCount;
+  // SequenceLookupRecord seqLookupRecords[];
+} ChainedSequenceContextFormat3;
+
+typedef struct packed_BE {
+  uint16_t glyphCount;
+  uint16_t coverageOffsets[];
+} ChainedSequenceContextFormat3_generic;
+
+typedef struct packed_BE {
+  uint16_t backtrackGlyphCount;
+  uint16_t backtrackCoverageOffsets[];
+} ChainedSequenceContextFormat3_backtrack;
+
+typedef struct packed_BE {
+  uint16_t inputGlyphCount;
+  uint16_t inputCoverageOffsets[];
+} ChainedSequenceContextFormat3_input;
+typedef struct packed_BE {
+  uint16_t lookaheadGlyphCount;
+  uint16_t lookaheadCoverageOffsets[];
+} ChainedSequenceContextFormat3_lookahead;
+typedef struct packed_BE {
+  uint16_t seqLookupCount;
+  SequenceLookupRecord seqLookupRecords[];
+} ChainedSequenceContextFormat3_seq;
+
+
+/** Extension Substitution Format - Type 7 **/
 typedef struct packed_BE {
   uint16_t substFormat;
   uint16_t extensionLookupType;
   uint32_t extensionOffset;
 } ExtensionSubstitutionTable;
+
+/** Reverse Chaining Single Substitution Format - Type 8 **/
+
+
+/** Custom **/
+
 
 typedef struct {
   FT_Face face;
@@ -184,6 +275,7 @@ GlyphArray *apply_chain(const Chain *chain, const GlyphArray* glyph_array);
 GlyphArray *GlyphArray_new(size_t size);
 GlyphArray *GlyphArray_new_from_utf8(FT_Face face, const char *string, size_t len);
 bool GlyphArray_append(GlyphArray *glyph_array, const uint16_t *data, size_t data_size);
+bool GlyphArray_shrink(GlyphArray *glyph_array, size_t reduction);
 void GlyphArray_free(GlyphArray *ga);
 void GlyphArray_print(GlyphArray *ga);
 void GlyphArray_print2(FT_Face face, GlyphArray *ga);
