@@ -215,7 +215,7 @@ typedef struct packed_BE {
 
 typedef struct packed_BE {
   uint16_t chainedSeqRuleCount;
-  uint16_t chainedSeqRuleOffsets;
+  uint16_t chainedSeqRuleOffsets[];
 } ChainedSequenceRuleSet;
 
 typedef struct packed_BE {
@@ -228,6 +228,31 @@ typedef struct packed_BE {
   // uint16_t seqLookupCount;
   // SequenceLookupRecord seqLookupRecords[];
 } ChainedSequenceRule;
+
+typedef struct packed_BE {
+  uint16_t glyphCount;
+  uint16_t sequence[];
+} ChainedSequenceRule_generic;
+
+typedef struct packed_BE {
+  uint16_t backtrackGlyphCount;
+  uint16_t backtrackSequence[];
+} ChainedSequenceRule_backtrack;
+
+typedef struct packed_BE {
+  uint16_t inputGlyphCount;
+  uint16_t inputSequence[];
+} ChainedSequenceRule_input;
+
+typedef struct packed_BE {
+  uint16_t lookaheadGlyphCount;
+  uint16_t lookaheadSequence[];
+} ChainedSequenceRule_lookahead;
+
+typedef struct packed_BE {
+  uint16_t seqLookupCount;
+  SequenceLookupRecord seqLookupRecords[];
+} ChainedSequenceRule_seq;
 
 
 
