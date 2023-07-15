@@ -465,7 +465,7 @@ uint16_t *build_coverage_array(const CoverageTable *table, uint32_t *size) {
     case 2: { // Range of glyphs
       CoverageRangesTable *rangesTable = (CoverageRangesTable *)table;
       CoverageRangeRecordTable last_range = rangesTable->rangeRecords[rangesTable->rangeCount - 1];
-      _size = last_range.startCoverageIndex + (last_range.endGlyphID - last_range.startGlyphID);
+      _size = last_range.startCoverageIndex + (last_range.endGlyphID - last_range.startGlyphID) + 1;
       array = malloc(sizeof(uint16_t) * (_size + 1));
       if (!array) return NULL;
       uint16_t k = 0;
