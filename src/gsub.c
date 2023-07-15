@@ -569,7 +569,7 @@ typedef struct packed_BE {
   uint16_t *address;
 } BE_address;
 
-static bool check_with_Coverage(const GlyphArray *glyph_array, size_t index, const uint8_t *coverageTablesBase, ChainedSequenceContextFormat3_generic *coverageTables, uint8_t step) {
+static bool check_with_Coverage(const GlyphArray *glyph_array, size_t index, const uint8_t *coverageTablesBase, ChainedSequenceContextFormat3_generic *coverageTables, int8_t step) {
   for (uint16_t i = 0; i < coverageTables->glyphCount; i++) {
     uint32_t size = 0;
     CoverageTable *coverageTable = (CoverageTable *)(coverageTablesBase + coverageTables->coverageOffsets[i]);
