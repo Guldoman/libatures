@@ -587,7 +587,7 @@ static bool check_with_Coverage(const GlyphArray *glyph_array, size_t index, con
   return true;
 }
 
-static void apply_Lookup(const LookupList *lookupList, const LookupTable *lookupTable, GlyphArray* glyph_array);
+static void apply_Lookup_index(const LookupList *lookupList, const LookupTable *lookupTable, GlyphArray* glyph_array, size_t *index);
 
 static bool apply_ChainedSequenceSubstitution(const LookupList *lookupList, const GenericChainedSequenceContextFormat *genericChainedSequence, GlyphArray* glyph_array, size_t index) {
   switch (genericChainedSequence->format) {
@@ -629,7 +629,8 @@ static bool apply_ChainedSequenceSubstitution(const LookupList *lookupList, cons
       for (uint16_t i = 0; i < seqCoverage->seqLookupCount; i++) {
         const SequenceLookupRecord *sequenceLookupRecord = &seqCoverage->seqLookupRecords[i];
         const LookupTable *lookup = get_lookup(lookupList, sequenceLookupRecord->lookupListIndex);
-        apply_Lookup(lookupList, lookup, input_ga);
+        size_t input_index = sequenceLookupRecord->sequenceIndex;
+        apply_Lookup_index(lookupList, lookup, input_ga, &input_index);
       }
       GlyphArray_set(glyph_array, index + input_ga->len, &glyph_array->array[index + inputCoverage->inputGlyphCount], glyph_array->len - index - 1);
       GlyphArray_set(glyph_array, index, input_ga->array, input_ga->len);
@@ -710,18 +711,22 @@ static bool apply_lookup_subtable(const LookupList *lookupList, GlyphArray* glyp
   return applied;
 }
 
+static void apply_Lookup_index(const LookupList *lookupList, const LookupTable *lookupTable, GlyphArray* glyph_array, size_t *index) {
+  // Stop at the first substitution that's successfully applied.
+  for (uint16_t i = 0; i < lookupTable->subTableCount; i++) {
+    // TODO: we might want to check lookupTable->lookupFlag
+    GenericSubstTable *genericSubstTable = (GenericSubstTable *)((uint8_t *)lookupTable + lookupTable->subtableOffsets[i]);
+    if (apply_lookup_subtable(lookupList, glyph_array, genericSubstTable, lookupTable->lookupType, index)) {
+      break;
+    }
+  }
+}
+
 static void apply_Lookup(const LookupList *lookupList, const LookupTable *lookupTable, GlyphArray* glyph_array) {
   size_t index = 0;
   // For each glyph
   while (index < glyph_array->len) {
-    // Stop at the first substitution that's successfully applied.
-    for (uint16_t i = 0; i < lookupTable->subTableCount; i++) {
-      // TODO: we might want to check lookupTable->lookupFlag
-      GenericSubstTable *genericSubstTable = (GenericSubstTable *)((uint8_t *)lookupTable + lookupTable->subtableOffsets[i]);
-      if (apply_lookup_subtable(lookupList, glyph_array, genericSubstTable, lookupTable->lookupType, &index)) {
-        break;
-      }
-    }
+    apply_Lookup_index(lookupList, lookupTable, glyph_array, &index);
     index++;
   }
 }
