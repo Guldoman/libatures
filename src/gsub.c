@@ -615,7 +615,7 @@ static bool apply_ChainedSequenceSubstitution(const LookupList *lookupList, cons
         return false;
       }
       // backtrack is defined with inverse order, so glyph index - 2 will be backtrack coverage index 2
-      if (!check_with_Coverage(glyph_array, index, (uint8_t *)genericChainedSequence, (ChainedSequenceContextFormat3_generic *)(backtrackCoverage), -1)) {
+      if (!check_with_Coverage(glyph_array, index - 1, (uint8_t *)genericChainedSequence, (ChainedSequenceContextFormat3_generic *)(backtrackCoverage), -1)) {
         return false;
       }
       if (!check_with_Coverage(glyph_array, index + inputCoverage->inputGlyphCount, (uint8_t *)genericChainedSequence, (ChainedSequenceContextFormat3_generic *)(lookaheadCoverage), +1)) {
