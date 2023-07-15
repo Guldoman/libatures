@@ -166,7 +166,35 @@ typedef struct packed_BE {
   uint16_t componentGlyphIDs[];
 } LigatureTable;
 
-/** Sequence **/
+/** Sequence Context Format - Type 5 **/
+
+typedef struct packed_BE {
+  uint16_t format;
+} GenericSequenceContextFormat;
+
+typedef struct packed_BE {
+  uint16_t format;
+  uint16_t coverageOffset;
+  uint16_t seqRuleSetCount;
+  uint16_t seqRuleSetOffsets[];
+} SequenceContextFormat1;
+
+typedef struct packed_BE {
+  uint16_t format;
+  uint16_t coverageOffset;
+  uint16_t classDefOffset;
+  uint16_t classSeqRuleSetCount;
+  uint16_t classSeqRuleSetOffsets[];
+} SequenceContextFormat2;
+
+typedef struct packed_BE {
+  uint16_t format;
+  uint16_t glyphCount;
+  uint16_t seqLookupCount;
+  uint16_t coverageOffsets[];
+  //SequenceLookupRecord seqLookupRecords[];
+} SequenceContextFormat3;
+
 typedef struct packed_BE {
   uint16_t sequenceIndex;
   uint16_t lookupListIndex;
