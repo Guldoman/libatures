@@ -47,7 +47,7 @@ static bool GlyphArray_set(GlyphArray *glyph_array, size_t from, const uint16_t 
       // We could lose the "old" location before we can actually do the operation,
       // so we back it up first.
       if ((data >= ga->array && data < ga->array + ga->len) ||
-          (ga->array <= data && ga->array > data + data_size)) {
+          (data + data_size > ga->array && data + data_size <= ga->array + ga->len)) {
         uint16_t *new_array = NULL;
         new_array = malloc(sizeof(uint16_t) * new_size);
         memcpy(new_array, ga->array, ga->len * sizeof(uint16_t));
