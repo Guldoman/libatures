@@ -528,8 +528,8 @@ uint16_t *build_class_array(const ClassDefGeneric *table, uint32_t *size) {
       // }
 
       // Can't memcpy because of possible differences in padding and endianess.
-      for (uint16_t i = arrayTable->startGlyphID; i < arrayTable->glyphCount; i++) {
-        array[i] = arrayTable->classValueArray[i];
+      for (uint16_t i = 0; i < arrayTable->glyphCount; i++) {
+        array[arrayTable->startGlyphID + i] = arrayTable->classValueArray[i];
       }
       break;
     }
