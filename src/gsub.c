@@ -751,10 +751,9 @@ static bool apply_ChainedSequenceSubstitution(const LookupList *lookupList, cons
       uint32_t coverage_size = 0;
       uint16_t *coverage_array = build_coverage_array(coverageTable, &coverage_size);
       bool applicable = false;
-      uint32_t coverage_index;
-      for (uint32_t i = 0; i < coverage_size && i < chainedSequenceContext->chainedClassSeqRuleSetCount; i++) {
+      // TODO: the commented check isn't needed, right?
+      for (uint32_t i = 0; i < coverage_size/* && i < chainedSequenceContext->chainedClassSeqRuleSetCount*/; i++) {
         if(glyph_array->array[*index] == coverage_array[i]) {
-          coverage_index = i;
           applicable = true;
           break;
         }
