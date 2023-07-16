@@ -647,7 +647,7 @@ static bool apply_ChainedSequenceSubstitution(const LookupList *lookupList, cons
           size_t input_index = sequenceLookupRecord->sequenceIndex;
           apply_Lookup_index(lookupList, lookup, input_ga, &input_index);
         }
-        GlyphArray_set(glyph_array, *index + input_ga->len, &glyph_array->array[*index + inputSequenceRule->inputGlyphCount], glyph_array->len - *index - 1);
+        GlyphArray_set(glyph_array, *index + input_ga->len, &glyph_array->array[*index + inputSequenceRule->inputGlyphCount], glyph_array->len - (*index + inputSequenceRule->inputGlyphCount));
         GlyphArray_set(glyph_array, *index, input_ga->array, input_ga->len);
         if (input_ga->len < inputSequenceRule->inputGlyphCount) {
           GlyphArray_shrink(glyph_array, inputSequenceRule->inputGlyphCount - input_ga->len);
@@ -695,7 +695,7 @@ static bool apply_ChainedSequenceSubstitution(const LookupList *lookupList, cons
         size_t input_index = sequenceLookupRecord->sequenceIndex;
         apply_Lookup_index(lookupList, lookup, input_ga, &input_index);
       }
-      GlyphArray_set(glyph_array, *index + input_ga->len, &glyph_array->array[*index + inputCoverage->inputGlyphCount], glyph_array->len - *index - 1);
+      GlyphArray_set(glyph_array, *index + input_ga->len, &(glyph_array->array[*index + inputCoverage->inputGlyphCount]), glyph_array->len - (*index + inputCoverage->inputGlyphCount));
       GlyphArray_set(glyph_array, *index, input_ga->array, input_ga->len);
       if (input_ga->len < inputCoverage->inputGlyphCount) {
         GlyphArray_shrink(glyph_array, inputCoverage->inputGlyphCount - input_ga->len);
