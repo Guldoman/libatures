@@ -717,13 +717,13 @@ static bool apply_ChainedSequenceSubstitution(const LookupList *lookupList, cons
         }
         // The inputSequence doesn't include the initial glyph.
         if(!check_with_Sequence(glyph_array, *index + 1, (ChainedSequenceRule_generic *)inputSequenceRule, +1, true)) {
-          break;
+          continue;
         }
         if(!check_with_Sequence(glyph_array, *index - 1, (ChainedSequenceRule_generic *)backtrackSequenceRule, -1, false)) {
-          break;
+          continue;
         }
         if(!check_with_Sequence(glyph_array, *index + inputSequenceRule->inputGlyphCount, (ChainedSequenceRule_generic *)lookaheadSequenceRule, +1, false)) {
-          break;
+          continue;
         }
 
         GlyphArray *input_ga = GlyphArray_new(inputSequenceRule->inputGlyphCount);
