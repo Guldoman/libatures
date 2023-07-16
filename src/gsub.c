@@ -218,6 +218,11 @@ enum {
   ChainedSequenceContextFormat_3
 } ChainedSequenceContextFormats;
 
+enum {
+  ClassFormat_1 = 1,
+  ClassFormat_2
+} ClassFormats;
+
 // Return the ScriptTable with the specified tag.
 // If the tag is NULL, the default script is returned.
 static const ScriptTable *get_script_table(const ScriptList *scriptList, const char (*script)[4]) {
@@ -464,9 +469,9 @@ uint16_t *build_coverage_array(const CoverageTable *table, uint32_t *size) {
     }
     case 2: { // Range of glyphs
       CoverageRangesTable *rangesTable = (CoverageRangesTable *)table;
-      CoverageRangeRecordTable last_range = rangesTable->rangeRecords[rangesTable->rangeCount - 1];
-      _size = last_range.startCoverageIndex + (last_range.endGlyphID - last_range.startGlyphID) + 1;
-      array = malloc(sizeof(uint16_t) * (_size + 1));
+      CoverageRangeRecordTable *last_range = &(rangesTable->rangeRecords[rangesTable->rangeCount - 1]);
+      _size = last_range->startCoverageIndex + (last_range->endGlyphID - last_range->startGlyphID) + 1;
+      array = malloc(sizeof(uint16_t) * _size);
       if (!array) return NULL;
       uint16_t k = 0;
       for (uint16_t i = 0; i < rangesTable->rangeCount; i++) {
@@ -477,7 +482,57 @@ uint16_t *build_coverage_array(const CoverageTable *table, uint32_t *size) {
       break;
     }
     default:
+      fprintf(stderr, "UNKNOWN coverage format\n");
+      return NULL;
+  }
+  if (size != NULL) *size = _size;
+  return array;
+}
+
+// TODO: maybe detect sparse coverages and encode in a different format
+uint16_t *build_class_array(const ClassDefGeneric *table, uint32_t *size) {
+  uint16_t *array = NULL;
+  uint32_t _size = 0;
+  switch (table->classFormat) {
+    case ClassFormat_1: { // Individual glyph indices
+      ClassDefFormat1 *arrayTable = (ClassDefFormat1 *)table;
+      _size = arrayTable->startGlyphID + arrayTable->glyphCount;
+      array = calloc(_size, sizeof(uint16_t));
+      if (!array) return NULL;
+
+      // TODO: this way to represent a class is way too expensive.
+      //       Will have to make a custom ADT for this...
+
+      // This isn't needed as calloc takes care of it,
+      // as it looks like any glyph not covered by the class array
+      // is supposed to be of class 0
+      // for (uint16_t i = 0; i < arrayTable->startGlyphID; i++) {
+      //   array[i] = 0;
+      // }
+
+      // Can't memcpy because of possible differences in padding and endianess.
+      for (uint16_t i = arrayTable->startGlyphID; i < arrayTable->glyphCount; i++) {
+        array[i] = arrayTable->classValueArray[i];
+      }
       break;
+    }
+    case ClassFormat_2: { // Range of glyphs
+      ClassDefFormat2 *rangesTable = (ClassDefFormat2 *)table;
+      ClassRangeRecord *last_range = &(rangesTable->classRangeRecords[rangesTable->classRangeCount - 1]);
+      _size = last_range->endGlyphID + 1;
+      array = calloc(_size, sizeof(uint16_t));
+      if (!array) return NULL;
+
+      for (uint16_t i = 0; i < rangesTable->classRangeCount; i++) {
+        ClassRangeRecord *range = &rangesTable->classRangeRecords[i];
+        for (uint16_t j = range->startGlyphID; j <= range->endGlyphID; j++)
+          array[j] = range->_class;
+      }
+      break;
+    }
+    default:
+      fprintf(stderr, "UNKNOWN class format\n");
+      return NULL;
   }
   if (size != NULL) *size = _size;
   return array;
@@ -593,6 +648,20 @@ static bool check_with_Coverage(const GlyphArray *glyph_array, size_t index, con
   return true;
 }
 
+static bool check_with_Class(const GlyphArray *glyph_array, size_t index, const uint16_t *class_array, uint32_t class_array_size, ChainedClassSequenceRule_generic *sequenceTable, int8_t step, bool skip_last) {
+  for (uint16_t i = 0; i < sequenceTable->glyphCount - (skip_last ? 1 : 0); i++) {
+    uint16_t glyph = glyph_array->array[index + (i * step)];
+    if (glyph >= class_array_size) {
+      return false;
+    }
+    uint16_t class = class_array[glyph];
+    if (class != sequenceTable->sequence[i]) {
+      return false;
+    }
+  }
+  return true;
+}
+
 static void apply_Lookup_index(const LookupList *lookupList, const LookupTable *lookupTable, GlyphArray* glyph_array, size_t *index);
 
 static bool apply_ChainedSequenceSubstitution(const LookupList *lookupList, const GenericChainedSequenceContextFormat *genericChainedSequence, GlyphArray* glyph_array, size_t *index) {
@@ -611,6 +680,7 @@ static bool apply_ChainedSequenceSubstitution(const LookupList *lookupList, cons
           break;
         }
       }
+      free(coverage_array);
       if (!applicable) return false;
 
       ChainedSequenceRuleSet *chainedSequenceRuleSet = (ChainedSequenceRuleSet *)((uint8_t *)chainedSequenceContext + chainedSequenceContext->chainedSeqRuleSetOffsets[coverage_index]);
@@ -659,7 +729,86 @@ static bool apply_ChainedSequenceSubstitution(const LookupList *lookupList, cons
       break;
     }
     case ChainedSequenceContextFormat_2: {
-      fprintf(stderr, "Unsupported ChainedSequenceContextFormat %d\n", genericChainedSequence->format);
+      ChainedSequenceContextFormat2 *chainedSequenceContext = (ChainedSequenceContextFormat2 *)genericChainedSequence;
+      CoverageTable *coverageTable = (CoverageTable *)((uint8_t *)chainedSequenceContext + chainedSequenceContext->coverageOffset);
+      uint32_t coverage_size = 0;
+      uint16_t *coverage_array = build_coverage_array(coverageTable, &coverage_size);
+      bool applicable = false;
+      uint32_t coverage_index;
+      for (uint32_t i = 0; i < coverage_size && i < chainedSequenceContext->chainedClassSeqRuleSetCount; i++) {
+        if(glyph_array->array[*index] == coverage_array[i]) {
+          coverage_index = i;
+          applicable = true;
+          break;
+        }
+      }
+      free(coverage_array);
+      if (!applicable) return false;
+
+      ClassDefGeneric *inputClassDef = (ClassDefGeneric *)((uint8_t *)chainedSequenceContext + chainedSequenceContext->inputClassDefOffset);
+      ClassDefGeneric *backtrackClassDef = (ClassDefGeneric *)((uint8_t *)chainedSequenceContext + chainedSequenceContext->backtrackClassDefOffset);
+      ClassDefGeneric *lookaheadClassDef = (ClassDefGeneric *)((uint8_t *)chainedSequenceContext + chainedSequenceContext->lookaheadClassDefOffset);
+
+      uint32_t input_class_size = 0, backtrack_class_size = 0, lookahead_class_size = 0;
+      uint16_t *input_class_array = build_class_array(inputClassDef, &input_class_size);
+      uint16_t starting_class = input_class_array[glyph_array->array[*index]];
+      if (starting_class >= chainedSequenceContext->chainedClassSeqRuleSetCount) {
+        // ??
+        break;
+      }
+      const ChainedClassSequenceRuleSet *chainedRuleSet = (ChainedClassSequenceRuleSet *)((uint8_t *)chainedSequenceContext + chainedSequenceContext->chainedClassSeqRuleSetOffsets[starting_class]);
+      if (chainedRuleSet == NULL) {
+        break;
+      }
+      uint16_t *backtrack_class_array = build_class_array(backtrackClassDef, &backtrack_class_size);
+      uint16_t *lookahead_class_array = build_class_array(lookaheadClassDef, &lookahead_class_size);
+      
+      for (uint16_t i = 0; i < chainedRuleSet->chainedClassSeqRuleCount; i++) {
+        const ChainedClassSequenceRule *chainedClassSequenceRule = (ChainedClassSequenceRule *)((uint8_t *)chainedRuleSet + chainedRuleSet->chainedClassSeqRuleOffsets[i]);
+        const ChainedClassSequenceRule_backtrack *backtrackSequenceRule = (ChainedClassSequenceRule_backtrack *)chainedClassSequenceRule;
+        const ChainedClassSequenceRule_input *inputSequenceRule = (ChainedClassSequenceRule_input *)((uint8_t *)backtrackSequenceRule + sizeof(uint16_t) * (backtrackSequenceRule->backtrackGlyphCount + 1));
+        const ChainedClassSequenceRule_lookahead *lookaheadSequenceRule = (ChainedClassSequenceRule_lookahead *)((uint8_t *)inputSequenceRule + sizeof(uint16_t) * (inputSequenceRule->inputGlyphCount)); // inputGlyphCount includes the initial one, that's not present in the array
+        const ChainedClassSequenceRule_seq *sequenceRule = (ChainedClassSequenceRule_seq *)((uint8_t *)lookaheadSequenceRule + sizeof(uint16_t) * (lookaheadSequenceRule->lookaheadGlyphCount + 1));
+
+        if (*index + inputSequenceRule->inputGlyphCount + lookaheadSequenceRule->lookaheadGlyphCount > glyph_array->len) {
+          continue;
+        }
+        if (backtrackSequenceRule->backtrackGlyphCount > *index) {
+          continue;
+        }
+        // The inputSequence doesn't include the initial glyph.
+        if(!check_with_Class(glyph_array, *index + 1, input_class_array, input_class_size, (ChainedClassSequenceRule_generic *)inputSequenceRule, +1, true)) {
+          continue;
+        }
+        if(!check_with_Class(glyph_array, *index - 1, backtrack_class_array, backtrack_class_size, (ChainedClassSequenceRule_generic *)backtrackSequenceRule, -1, false)) {
+          continue;
+        }
+        if(!check_with_Class(glyph_array, *index + inputSequenceRule->inputGlyphCount, lookahead_class_array, lookahead_class_size, (ChainedClassSequenceRule_generic *)lookaheadSequenceRule, +1, false)) {
+          continue;
+        }
+
+        GlyphArray *input_ga = GlyphArray_new(inputSequenceRule->inputGlyphCount);
+        GlyphArray_append(input_ga, &glyph_array->array[*index], inputSequenceRule->inputGlyphCount);
+        for (uint16_t i = 0; i < sequenceRule->seqLookupCount; i++) {
+          const SequenceLookupRecord *sequenceLookupRecord = &sequenceRule->seqLookupRecords[i];
+          const LookupTable *lookup = get_lookup(lookupList, sequenceLookupRecord->lookupListIndex);
+          size_t input_index = sequenceLookupRecord->sequenceIndex;
+          apply_Lookup_index(lookupList, lookup, input_ga, &input_index);
+        }
+        GlyphArray_set(glyph_array, *index + input_ga->len, &glyph_array->array[*index + inputSequenceRule->inputGlyphCount], glyph_array->len - (*index + inputSequenceRule->inputGlyphCount));
+        GlyphArray_set(glyph_array, *index, input_ga->array, input_ga->len);
+        if (input_ga->len < inputSequenceRule->inputGlyphCount) {
+          GlyphArray_shrink(glyph_array, inputSequenceRule->inputGlyphCount - input_ga->len);
+        }
+        *index += input_ga->len - 1; // ++ will be done by apply_Lookup
+        GlyphArray_free(input_ga);
+
+        // Only use the first one that matches.
+        return true;
+      }
+      free(input_class_array);
+      free(backtrack_class_array);
+      free(lookahead_class_array);
       break;
     }
     case ChainedSequenceContextFormat_3: {
