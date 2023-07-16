@@ -296,7 +296,7 @@ static LookupTable *get_lookup(const LookupList *lookupList, uint16_t index) {
 // Returns the number of lookups inside the FeatureTable.
 // lookups must either be an array big enough to contain
 // all the pointers to lookups, or be NULL.
-static size_t get_lookups_from_feature(const FeatureTable *featureTable, const LookupList *lookupList, LookupTable **lookups) {
+static size_t get_lookups_from_feature(const FeatureTable *featureTable, const LookupList *lookupList, bool *lookups_map) {
   size_t c = 0;
   for (uint16_t k = 0; k < featureTable->lookupIndexCount; k++) {
     LookupTable *lookup = get_lookup(lookupList, featureTable->lookupListIndices[k]);
@@ -305,10 +305,10 @@ static size_t get_lookups_from_feature(const FeatureTable *featureTable, const L
       // Try with next feature
       continue;
     }
-    if (lookups != NULL) {
-      lookups[c] = lookup;
+    if (!lookups_map[featureTable->lookupListIndices[k]]) {
+      lookups_map[featureTable->lookupListIndices[k]] = true;
+      c++;
     }
-    c++;
   }
   return c;
 }
@@ -317,14 +317,17 @@ static size_t get_lookups_from_feature(const FeatureTable *featureTable, const L
 // filtered and sorted as specified in features_enabled.
 // lookups must either be an array big enough to contain
 // all the pointers to lookups, or be NULL.
-static size_t get_lookups(const LangSysTable* langSysTable, const FeatureList *featureList, const LookupList *lookupList, const char (*features_enabled)[4], size_t nFeatures, LookupTable **lookups) {
+static size_t get_lookups(const LangSysTable* langSysTable, const FeatureList *featureList, const LookupList *lookupList, const char (*features_enabled)[4], size_t nFeatures, LookupTable ***lookups) {
+  bool *lookups_map = calloc(lookupList->lookupCount, sizeof(bool));
+  if (lookups_map == NULL) return 0;
+
   size_t c = 0;
   if (features_enabled == NULL) return 0;
 
   for (size_t i = 0; i < nFeatures; i++) {
     if (langSysTable->requiredFeatureIndex != 0xFFFF && compare_tags(_RQD_tag, features_enabled[i])) {
       const FeatureTable *featureTable = get_feature(featureList, langSysTable->requiredFeatureIndex, NULL);
-      c += get_lookups_from_feature(featureTable, lookupList, lookups ? &lookups[c] : NULL);
+      c += get_lookups_from_feature(featureTable, lookupList, lookups_map);
       continue;
     }
     for (uint16_t j = 0; j < langSysTable->featureIndexCount; j++) {
@@ -339,11 +342,28 @@ static size_t get_lookups(const LangSysTable* langSysTable, const FeatureList *f
       if (compare_tags(featureTag, features_enabled[i])) {
         // There should be only one feature with the same tag
         // TODO: check if this is actually the case
-        c += get_lookups_from_feature(featureTable, lookupList, lookups ? &lookups[c] : NULL);
+        c += get_lookups_from_feature(featureTable, lookupList, lookups_map);
         break;
       }
     }
   }
+  if (lookups != NULL) {
+    LookupTable **_lookups = malloc(sizeof(LookupTable *) * c);
+    if (_lookups == NULL) {
+      *lookups = NULL;
+      goto end;
+    }
+    for (uint16_t i = 0, j = 0; i < lookupList->lookupCount; i++) {
+      if (lookups_map[i]) {
+        _lookups[j] = get_lookup(lookupList, i);
+        printf("%d -> %d\n", j, i);
+        j++;
+      }
+    }
+    *lookups = _lookups;
+  }
+end:
+  free(lookups_map);
   return c;
 }
 
@@ -383,10 +403,7 @@ Chain *generate_chain(FT_Face face, const char (*script)[4], const char (*lang)[
   const FeatureList *featureList = (FeatureList *)((uint8_t *)gsubHeader + gsubHeader->featureListOffset);
   const LookupList *lookupList = (LookupList *)((uint8_t *)gsubHeader + gsubHeader->lookupListOffset);
 
-  // Obtain first the number of lookups.
-  size_t lookupCount = get_lookups(langSysTable, featureList, lookupList, features, n_features, NULL);
-  lookupsArray = malloc(sizeof(LookupList *) * lookupCount);
-  get_lookups(langSysTable, featureList, lookupList, features, n_features, lookupsArray);
+  size_t lookupCount = get_lookups(langSysTable, featureList, lookupList, features, n_features, &lookupsArray);
 
   Chain *chain = malloc(sizeof(Chain));
   if (chain == NULL)
