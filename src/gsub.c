@@ -223,6 +223,10 @@ enum {
   ClassFormat_2
 } ClassFormats;
 
+enum {
+  ReverseChainSingleSubstFormat_1 = 1,
+} ReverseChainSingleSubstFormat;
+
 // Return the ScriptTable with the specified tag.
 // If the tag is NULL, the default script is returned.
 static const ScriptTable *get_script_table(const ScriptList *scriptList, const char (*script)[4]) {
@@ -871,6 +875,56 @@ static bool apply_ChainedSequenceSubstitution(const LookupList *lookupList, cons
   return false;
 }
 
+
+static bool apply_ReverseChainingContextSingleLookupType(const ReverseChainSingleSubstFormat1 *reverseChain, GlyphArray* glyph_array, size_t index, const uint16_t *coverage_array, uint32_t coverage_size) {
+  switch (reverseChain->substFormat) {
+    case ReverseChainSingleSubstFormat_1: {
+      bool applicable = false;
+      uint32_t coverage_index;
+      for (uint32_t i = 0; i < coverage_size; i++) {
+        if (glyph_array->array[index] == coverage_array[i]) {
+          coverage_index = i;
+          applicable = true;
+          break;
+        }
+      }
+      if (!applicable) return false;
+
+      const ReverseChainSingleSubstFormat1_backtrack *backtrackCoverage = (ReverseChainSingleSubstFormat1_backtrack *)((uint8_t *)reverseChain + sizeof(uint16_t) * 2);
+      const ReverseChainSingleSubstFormat1_lookahead *lookaheadCoverage = (ReverseChainSingleSubstFormat1_lookahead *)((uint8_t *)backtrackCoverage + sizeof(uint16_t) * (backtrackCoverage->backtrackGlyphCount + 1));
+      const ReverseChainSingleSubstFormat1_sub *substitutionTable = (ReverseChainSingleSubstFormat1_sub *)((uint8_t *)lookaheadCoverage + sizeof(uint16_t) * (lookaheadCoverage->lookaheadGlyphCount + 1));
+
+      if (index + lookaheadCoverage->lookaheadGlyphCount >= glyph_array->len) {
+        return false;
+      }
+      if (backtrackCoverage->backtrackGlyphCount > index) {
+        return false;
+      }
+      // backtrack is defined with inverse order, so glyph index - 2 will be backtrack coverage index 2
+      if (!check_with_Coverage(glyph_array, index - 1, (uint8_t *)reverseChain, (ChainedSequenceContextFormat3_generic *)(backtrackCoverage), -1)) {
+        return false;
+      }
+      if (!check_with_Coverage(glyph_array, index + 1, (uint8_t *)reverseChain, (ChainedSequenceContextFormat3_generic *)(lookaheadCoverage), +1)) {
+        return false;
+      }
+
+      if (coverage_index > substitutionTable->glyphCount) {
+        fprintf(stderr, "Possible mistake in ReverseChainingContextSingleLookupType implementation\n");
+        return false;
+      }
+      // TODO: we're using the coverage_index, but this is from our *generated* table, not the original one
+      //       so this is potentially very wrong.
+      glyph_array->array[index] = substitutionTable->substituteGlyphIDs[coverage_index];
+      printf("APPLIED\n");
+      return true;
+    }
+    default:
+      fprintf(stderr, "UNKNOWN ReverseChainSingleSubstFormat %d\n", reverseChain->substFormat);
+      break;
+  }
+  return false;
+}
+
 static bool apply_lookup_subtable(const LookupList *lookupList, GlyphArray* glyph_array, GenericSubstTable *genericSubstTable, uint16_t lookupType, size_t *index) {
   bool applied = false;
   switch (lookupType) {
@@ -925,9 +979,16 @@ static bool apply_lookup_subtable(const LookupList *lookupList, GlyphArray* glyp
       applied = apply_lookup_subtable(lookupList, glyph_array, _genericSubstTable, extensionSubstitutionTable->extensionLookupType, index);
       break;
     }
-    case ReverseChainingContextSingleLookupType:
-      fprintf(stderr, "ReverseChainingContextSingleLookupType unsupported\n");
+    case ReverseChainingContextSingleLookupType: {
+      ReverseChainSingleSubstFormat1 *reverseChain = (ReverseChainSingleSubstFormat1 *)genericSubstTable;
+      CoverageTable *coverageTable = (CoverageTable *)((uint8_t *)reverseChain + reverseChain->coverageOffset);
+      uint32_t size = 0;
+      uint16_t *coverage_array = build_coverage_array(coverageTable, &size);
+      // Stop at the first one we apply
+      applied = apply_ReverseChainingContextSingleLookupType(reverseChain, glyph_array, *index, coverage_array, size);
+      free(coverage_array);
       break;
+    }
     default:
       fprintf(stderr, "UNKNOWN LookupType\n");
       break;

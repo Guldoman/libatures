@@ -376,7 +376,31 @@ typedef struct packed_BE {
 } ExtensionSubstitutionTable;
 
 /** Reverse Chaining Single Substitution Format - Type 8 **/
+typedef struct packed_BE {
+  uint16_t substFormat;
+  uint16_t coverageOffset;
+  uint16_t backtrackGlyphCount;
+  uint16_t backtrackCoverageOffsets[];
+  // uint16_t lookaheadGlyphCount;
+  // uint16_t lookaheadCoverageOffsets[];
+  // uint16_t glyphCount;
+  // uint16_t substituteGlyphIDs[];
+} ReverseChainSingleSubstFormat1;
 
+typedef struct packed_BE {
+  uint16_t backtrackGlyphCount;
+  uint16_t backtrackCoverageOffsets[];
+} ReverseChainSingleSubstFormat1_backtrack;
+
+typedef struct packed_BE {
+  uint16_t lookaheadGlyphCount;
+  uint16_t lookaheadCoverageOffsets[];
+} ReverseChainSingleSubstFormat1_lookahead;
+
+typedef struct packed_BE {
+  uint16_t glyphCount;
+  uint16_t substituteGlyphIDs[];
+} ReverseChainSingleSubstFormat1_sub;
 
 /** Custom **/
 
