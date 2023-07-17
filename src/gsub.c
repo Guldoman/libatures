@@ -29,7 +29,7 @@ void GlyphArray_free(GlyphArray *ga) {
 }
 
 
-static bool GlyphArray_set(GlyphArray *glyph_array, size_t from, const uint16_t *data, size_t data_size) {
+bool GlyphArray_set(GlyphArray *glyph_array, size_t from, const uint16_t *data, size_t data_size) {
   GlyphArray *ga = glyph_array;
   if (from > ga->len) {
     // TODO: error out maybe?
@@ -126,7 +126,14 @@ GlyphArray *GlyphArray_new_from_utf8(FT_Face face, const char *string, size_t le
   return ga;
 }
 
-static bool GlyphArray_compare(GlyphArray *ga1, GlyphArray *ga2) {
+GlyphArray *GlyphArray_new_from_data(uint16_t *data, size_t len) {
+  GlyphArray *ga = GlyphArray_new(len);
+  if (ga == NULL) return NULL;
+  GlyphArray_set(ga, 0, data, len);
+  return ga;
+}
+
+bool GlyphArray_compare(GlyphArray *ga1, GlyphArray *ga2) {
   if (ga1->len != ga2->len) return false;
   if (memcmp(ga1->array, ga2->array, ga1->len) != 0) return false;
   return true;
