@@ -88,6 +88,7 @@ typedef struct packed_BE {
   uint16_t array[];
 } CoverageTable;
 
+// The glyphArray contains glyphIDs in numerical order
 typedef struct packed_BE {
   uint16_t coverageFormat;
   uint16_t glyphCount;

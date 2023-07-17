@@ -485,42 +485,57 @@ end:
 }
 
 
-// TODO: maybe detect sparse coverages and encode in a different format
-uint16_t *build_coverage_array(const CoverageTable *table, uint32_t *size) {
-  uint16_t *array = NULL;
-  uint32_t _size = 0;
-  switch (table->coverageFormat) {
+static bool find_in_coverage(const CoverageTable *coverageTable, uint16_t id, uint32_t *index) {
+  switch (coverageTable->coverageFormat) {
     case 1: { // Individual glyph indices
-      CoverageArrayTable *arrayTable = (CoverageArrayTable *)table;
-      _size = arrayTable->glyphCount;
-      array = malloc(sizeof(uint16_t) * _size);
-      if (!array) return NULL;
-      // Can't memcpy because of possible differences in padding and endianess.
+      const CoverageArrayTable *arrayTable = (CoverageArrayTable *)coverageTable;
       for (uint16_t i = 0; i < arrayTable->glyphCount; i++) {
-        array[i] = arrayTable->glyphArray[i];
+        if (id == arrayTable->glyphArray[i]) {
+          if (index != NULL) {
+            *index = i;
+          }
+          return true;
+        }
+        // The glyphArray contains glyphIDs in numerical order,
+        // and we passed out ID.
+        if (id < arrayTable->glyphArray[i]) {
+          break;
+        }
       }
       break;
     }
     case 2: { // Range of glyphs
-      CoverageRangesTable *rangesTable = (CoverageRangesTable *)table;
-      CoverageRangeRecordTable *last_range = &(rangesTable->rangeRecords[rangesTable->rangeCount - 1]);
-      _size = last_range->startCoverageIndex + (last_range->endGlyphID - last_range->startGlyphID) + 1;
-      array = malloc(sizeof(uint16_t) * _size);
-      if (!array) return NULL;
+      const CoverageRangesTable *rangesTable = (CoverageRangesTable *)coverageTable;
+      if (rangesTable->rangeCount == 0) return false;
+      const CoverageRangeRecordTable *first_range = &(rangesTable->rangeRecords[0]);
+      if (first_range->startGlyphID > id) return false;
+      const CoverageRangeRecordTable *last_range = &(rangesTable->rangeRecords[rangesTable->rangeCount - 1]);
+      if (last_range->endGlyphID < id) return false;
       uint16_t k = 0;
       for (uint16_t i = 0; i < rangesTable->rangeCount; i++) {
-        CoverageRangeRecordTable *range = &rangesTable->rangeRecords[i];
-        for (uint16_t j = range->startGlyphID; j <= range->endGlyphID; j++)
-          array[k++] = j;
+        const CoverageRangeRecordTable *range = &rangesTable->rangeRecords[i];
+        if (id < range->startGlyphID) break;
+        if (id > range->endGlyphID) {
+          k += range->endGlyphID - range->startGlyphID + 1;
+          continue;
+        }
+        for (uint16_t j = range->startGlyphID; j <= id; j++) {
+          if (id == j) {
+            if (index != NULL) {
+              *index = k;
+            }
+            return true;
+          }
+          k++;
+        }
       }
       break;
     }
     default:
       fprintf(stderr, "UNKNOWN coverage format\n");
-      return NULL;
+      return false;
   }
-  if (size != NULL) *size = _size;
-  return array;
+  return false;
 }
 
 // TODO: maybe detect sparse coverages and encode in a different format
@@ -567,25 +582,23 @@ uint16_t *build_class_array(const ClassDefGeneric *table, uint32_t *size) {
   return array;
 }
 
-static bool apply_SingleSubstitution(SingleSubstFormatGeneric *singleSubstFormatGeneric, GlyphArray* glyph_array, size_t index, uint16_t *coverage_array, uint32_t coverage_size) {
+static bool apply_SingleSubstitution(SingleSubstFormatGeneric *singleSubstFormatGeneric, GlyphArray* glyph_array, size_t index) {
+  CoverageTable *coverageTable = (CoverageTable *)((uint8_t *)singleSubstFormatGeneric + singleSubstFormatGeneric->coverageOffset);
   switch (singleSubstFormatGeneric->substFormat) {
     case SingleSubstitutionFormat_1: {
       SingleSubstFormat1 *singleSubst = (SingleSubstFormat1 *)singleSubstFormatGeneric;
-      for (uint32_t i = 0; i < coverage_size; i++) {
-        if (glyph_array->array[index] == coverage_array[i]) {
-          glyph_array->array[index] += singleSubst->deltaGlyphID;
-          return true;
-        }
+      if (find_in_coverage(coverageTable, glyph_array->array[index], NULL)) {
+        glyph_array->array[index] += singleSubst->deltaGlyphID;
+        return true;
       }
       break;
     }
     case SingleSubstitutionFormat_2: {
       SingleSubstFormat2 *singleSubst = (SingleSubstFormat2 *)singleSubstFormatGeneric;
-      for (uint32_t i = 0; i < coverage_size; i++) {
-        if (glyph_array->array[index] == coverage_array[i]) {
-          glyph_array->array[index] = singleSubst->substituteGlyphIDs[i];
-          return true;
-        }
+      uint32_t coverage_index;
+      if (find_in_coverage(coverageTable, glyph_array->array[index], &coverage_index)) {
+        glyph_array->array[index] = singleSubst->substituteGlyphIDs[coverage_index];
+        return true;
       }
       break;
     }
@@ -594,6 +607,21 @@ static bool apply_SingleSubstitution(SingleSubstFormatGeneric *singleSubstFormat
       break;
   }
   return false;
+}
+
+static bool apply_MultipleSubstitution(const MultipleSubstFormat1 *multipleSubstFormat, GlyphArray* glyph_array, size_t *index) {
+  CoverageTable *coverageTable = (CoverageTable *)((uint8_t *)multipleSubstFormat + multipleSubstFormat->coverageOffset);
+  uint32_t coverage_index;
+  bool applicable = find_in_coverage(coverageTable, glyph_array->array[*index], &coverage_index);
+  if (!applicable || coverage_index >= multipleSubstFormat->sequenceCount) return false;
+
+  SequenceTable *sequenceTable = (SequenceTable *)((uint8_t *)multipleSubstFormat + multipleSubstFormat->sequenceOffsets[coverage_index]);
+  GlyphArray_set(glyph_array, *index + sequenceTable->glyphCount - 1, &glyph_array->array[*index], glyph_array->len - *index - 1);
+  for (uint16_t j = 0; j < sequenceTable->glyphCount; j++) {
+    glyph_array->array[*index + j] = sequenceTable->substituteGlyphIDs[j];
+  }
+  *index += sequenceTable->glyphCount - 1; // ++ will be done by apply_Lookup
+  return true;
 }
 
 static LigatureTable *find_Ligature(LigatureSetTable *ligatureSet, GlyphArray* glyph_array, size_t index) {
@@ -614,37 +642,20 @@ static LigatureTable *find_Ligature(LigatureSetTable *ligatureSet, GlyphArray* g
   return (LigatureTable *)NULL;
 }
 
-static bool apply_MultipleSubstitution(const MultipleSubstFormat1 *multipleSubstFormat, GlyphArray* glyph_array, size_t *index, const uint16_t *coverage_array) {
-  // Find if there is any applicable ligature
-  for (uint32_t i = 0; i < multipleSubstFormat->sequenceCount; i++) {
-    SequenceTable *sequenceTable = (SequenceTable *)((uint8_t *)multipleSubstFormat + multipleSubstFormat->sequenceOffsets[i]);
-    if (glyph_array->array[*index] == coverage_array[i]) {
-      GlyphArray_set(glyph_array, *index + sequenceTable->glyphCount - 1, &glyph_array->array[*index], glyph_array->len - *index - 1);
-      for (uint16_t j = 0; j < sequenceTable->glyphCount; j++) {
-        glyph_array->array[*index + j] = sequenceTable->substituteGlyphIDs[j];
-      }
-      *index += sequenceTable->glyphCount - 1; // ++ will be done by apply_Lookup
-      return true;
-    }
-  }
-  return false;
-}
-
-static bool apply_LigatureSubstitution(LigatureSubstitutionTable *ligatureSubstitutionTable, GlyphArray* glyph_array, size_t index, uint16_t *coverage_array) {
-  // Find if there is any applicable ligature
-  for (uint32_t i = 0; i < ligatureSubstitutionTable->ligatureSetCount; i++) {
-    LigatureSetTable *ligatureSet = (LigatureSetTable *)((uint8_t *)ligatureSubstitutionTable + ligatureSubstitutionTable->ligatureSetOffsets[i]);
-    if (glyph_array->array[index] == coverage_array[i]) {
-      // printf("Checking %d\n", glyph_array->array[index]);
-      LigatureTable *ligature = find_Ligature(ligatureSet, glyph_array, index + 1);
-      if (ligature != NULL) {
-        // printf("FOUND ->%d\n", ligature->ligatureGlyph);
-        glyph_array->array[index] = ligature->ligatureGlyph;
-        GlyphArray_set(glyph_array, index + 1, &glyph_array->array[index + ligature->componentCount], glyph_array->len - (index + ligature->componentCount));
-        GlyphArray_shrink(glyph_array, ligature->componentCount - 1);
-        return true;
-      }
-    }
+static bool apply_LigatureSubstitution(LigatureSubstitutionTable *ligatureSubstitutionTable, GlyphArray* glyph_array, size_t index) {
+  CoverageTable *coverageTable = (CoverageTable *)((uint8_t *)ligatureSubstitutionTable + ligatureSubstitutionTable->coverageOffset);
+  uint32_t coverage_index;
+  bool applicable = find_in_coverage(coverageTable, glyph_array->array[index], &coverage_index);
+  if (!applicable || coverage_index >= ligatureSubstitutionTable->ligatureSetCount) return false;
+  LigatureSetTable *ligatureSet = (LigatureSetTable *)((uint8_t *)ligatureSubstitutionTable + ligatureSubstitutionTable->ligatureSetOffsets[coverage_index]);
+  // printf("Checking %d\n", glyph_array->array[index]);
+  LigatureTable *ligature = find_Ligature(ligatureSet, glyph_array, index + 1);
+  if (ligature != NULL) {
+    // printf("FOUND ->%d\n", ligature->ligatureGlyph);
+    glyph_array->array[index] = ligature->ligatureGlyph;
+    GlyphArray_set(glyph_array, index + 1, &glyph_array->array[index + ligature->componentCount], glyph_array->len - (index + ligature->componentCount));
+    GlyphArray_shrink(glyph_array, ligature->componentCount - 1);
+    return true;
   }
   return false;
 }
@@ -667,17 +678,8 @@ static bool check_with_Sequence(const GlyphArray *glyph_array, size_t index, Gen
 
 static bool check_with_Coverage(const GlyphArray *glyph_array, size_t index, const uint8_t *coverageTablesBase, GenericArray *coverageTables, uint16_t coverageSize, int8_t step) {
   for (uint16_t i = 0; i < coverageSize; i++) {
-    uint32_t size = 0;
     CoverageTable *coverageTable = (CoverageTable *)(coverageTablesBase + coverageTables->data[i]);
-    uint16_t *coverage_array = build_coverage_array(coverageTable, &size);
-    bool applicable = false;
-    for (uint32_t j = 0; j < size; j++) {
-      if (glyph_array->array[index + (i * step)] == coverage_array[j]) {
-        applicable = true;
-        break;
-      }
-    }
-    free(coverage_array);
+    bool applicable = find_in_coverage(coverageTable, glyph_array->array[index + (i * step)], NULL);
     if (!applicable) return false;
   }
   return true;
@@ -704,18 +706,8 @@ static bool apply_SequenceSubstitution(const LookupList *lookupList, const Gener
     case SequenceContextFormat_1: {
       SequenceContextFormat1 *sequenceContext = (SequenceContextFormat1 *)genericSequence;
       CoverageTable *coverageTable = (CoverageTable *)((uint8_t *)sequenceContext + sequenceContext->coverageOffset);
-      uint32_t size = 0;
-      uint16_t *coverage_array = build_coverage_array(coverageTable, &size);
-      bool applicable = false;
       uint32_t coverage_index;
-      for (uint32_t i = 0; i < size && i < sequenceContext->seqRuleSetCount; i++) {
-        if(glyph_array->array[*index] == coverage_array[i]) {
-          coverage_index = i;
-          applicable = true;
-          break;
-        }
-      }
-      free(coverage_array);
+      bool applicable = find_in_coverage(coverageTable, glyph_array->array[*index], &coverage_index);
       if (!applicable) return false;
 
       SequenceRuleSet *sequenceRuleSet = (SequenceRuleSet *)((uint8_t *)sequenceContext + sequenceContext->seqRuleSetOffsets[coverage_index]);
@@ -754,17 +746,7 @@ static bool apply_SequenceSubstitution(const LookupList *lookupList, const Gener
     case SequenceContextFormat_2: {
       SequenceContextFormat2 *sequenceContext = (SequenceContextFormat2 *)genericSequence;
       CoverageTable *coverageTable = (CoverageTable *)((uint8_t *)sequenceContext + sequenceContext->coverageOffset);
-      uint32_t coverage_size = 0;
-      uint16_t *coverage_array = build_coverage_array(coverageTable, &coverage_size);
-      bool applicable = false;
-      // TODO: the commented check isn't needed, right?
-      for (uint32_t i = 0; i < coverage_size/* && i < chainedSequenceContext->chainedClassSeqRuleSetCount*/; i++) {
-        if(glyph_array->array[*index] == coverage_array[i]) {
-          applicable = true;
-          break;
-        }
-      }
-      free(coverage_array);
+      bool applicable = find_in_coverage(coverageTable, glyph_array->array[*index], NULL);
       if (!applicable) return false;
 
       ClassDefGeneric *inputClassDef = (ClassDefGeneric *)((uint8_t *)sequenceContext + sequenceContext->classDefOffset);
@@ -860,19 +842,9 @@ static bool apply_ChainedSequenceSubstitution(const LookupList *lookupList, cons
     case ChainedSequenceContextFormat_1: {
       ChainedSequenceContextFormat1 *chainedSequenceContext = (ChainedSequenceContextFormat1 *)genericChainedSequence;
       CoverageTable *coverageTable = (CoverageTable *)((uint8_t *)chainedSequenceContext + chainedSequenceContext->coverageOffset);
-      uint32_t size = 0;
-      uint16_t *coverage_array = build_coverage_array(coverageTable, &size);
-      bool applicable = false;
       uint32_t coverage_index;
-      for (uint32_t i = 0; i < size && i < chainedSequenceContext->chainedSeqRuleSetCount; i++) {
-        if(glyph_array->array[*index] == coverage_array[i]) {
-          coverage_index = i;
-          applicable = true;
-          break;
-        }
-      }
-      free(coverage_array);
-      if (!applicable) return false;
+      bool applicable = find_in_coverage(coverageTable, glyph_array->array[*index], &coverage_index);
+      if (!applicable || coverage_index >= chainedSequenceContext->chainedSeqRuleSetCount) return false;
 
       ChainedSequenceRuleSet *chainedSequenceRuleSet = (ChainedSequenceRuleSet *)((uint8_t *)chainedSequenceContext + chainedSequenceContext->chainedSeqRuleSetOffsets[coverage_index]);
 
@@ -922,17 +894,7 @@ static bool apply_ChainedSequenceSubstitution(const LookupList *lookupList, cons
     case ChainedSequenceContextFormat_2: {
       ChainedSequenceContextFormat2 *chainedSequenceContext = (ChainedSequenceContextFormat2 *)genericChainedSequence;
       CoverageTable *coverageTable = (CoverageTable *)((uint8_t *)chainedSequenceContext + chainedSequenceContext->coverageOffset);
-      uint32_t coverage_size = 0;
-      uint16_t *coverage_array = build_coverage_array(coverageTable, &coverage_size);
-      bool applicable = false;
-      // TODO: the commented check isn't needed, right?
-      for (uint32_t i = 0; i < coverage_size/* && i < chainedSequenceContext->chainedClassSeqRuleSetCount*/; i++) {
-        if(glyph_array->array[*index] == coverage_array[i]) {
-          applicable = true;
-          break;
-        }
-      }
-      free(coverage_array);
+      bool applicable = find_in_coverage(coverageTable, glyph_array->array[*index], NULL);
       if (!applicable) return false;
 
       ClassDefGeneric *inputClassDef = (ClassDefGeneric *)((uint8_t *)chainedSequenceContext + chainedSequenceContext->inputClassDefOffset);
@@ -1055,18 +1017,12 @@ static bool apply_ChainedSequenceSubstitution(const LookupList *lookupList, cons
 }
 
 
-static bool apply_ReverseChainingContextSingleLookupType(const ReverseChainSingleSubstFormat1 *reverseChain, GlyphArray* glyph_array, size_t index, const uint16_t *coverage_array, uint32_t coverage_size) {
+static bool apply_ReverseChainingContextSingleLookupType(const ReverseChainSingleSubstFormat1 *reverseChain, GlyphArray* glyph_array, size_t index) {
+  CoverageTable *coverageTable = (CoverageTable *)((uint8_t *)reverseChain + reverseChain->coverageOffset);
   switch (reverseChain->substFormat) {
     case ReverseChainSingleSubstFormat_1: {
-      bool applicable = false;
       uint32_t coverage_index;
-      for (uint32_t i = 0; i < coverage_size; i++) {
-        if (glyph_array->array[index] == coverage_array[i]) {
-          coverage_index = i;
-          applicable = true;
-          break;
-        }
-      }
+      bool applicable = find_in_coverage(coverageTable, glyph_array->array[index], &coverage_index);
       if (!applicable) return false;
 
       const ReverseChainSingleSubstFormat1_backtrack *backtrackCoverage = (ReverseChainSingleSubstFormat1_backtrack *)((uint8_t *)reverseChain + sizeof(uint16_t) * 2);
@@ -1094,7 +1050,6 @@ static bool apply_ReverseChainingContextSingleLookupType(const ReverseChainSingl
       // TODO: we're using the coverage_index, but this is from our *generated* table, not the original one
       //       so this is potentially very wrong.
       glyph_array->array[index] = substitutionTable->substituteGlyphIDs[coverage_index];
-      printf("APPLIED\n");
       return true;
     }
     default:
@@ -1109,22 +1064,14 @@ static bool apply_lookup_subtable(const LookupList *lookupList, GlyphArray* glyp
   switch (lookupType) {
     case SingleLookupType: {
       SingleSubstFormatGeneric *singleSubstFormatGeneric = (SingleSubstFormatGeneric *)genericSubstTable;
-      CoverageTable *coverageTable = (CoverageTable *)((uint8_t *)singleSubstFormatGeneric + singleSubstFormatGeneric->coverageOffset);
-      uint32_t size = 0;
-      uint16_t *coverage_array = build_coverage_array(coverageTable, &size);
       // Stop at the first one we apply
-      applied = apply_SingleSubstitution(singleSubstFormatGeneric, glyph_array, *index, coverage_array, size);
-      free(coverage_array);
+      applied = apply_SingleSubstitution(singleSubstFormatGeneric, glyph_array, *index);
       break;
     }
     case MultipleLookupType: {
       MultipleSubstFormat1 *multipleSubstFormat = (MultipleSubstFormat1 *)genericSubstTable;
-      CoverageTable *coverageTable = (CoverageTable *)((uint8_t *)multipleSubstFormat + multipleSubstFormat->coverageOffset);
-      uint32_t size = 0;
-      uint16_t *coverage_array = build_coverage_array(coverageTable, &size);
       // Stop at the first one we apply
-      applied = apply_MultipleSubstitution(multipleSubstFormat, glyph_array, index, coverage_array);
-      free(coverage_array);
+      applied = apply_MultipleSubstitution(multipleSubstFormat, glyph_array, index);
       break;
     }
     case AlternateLookupType: // TODO: just filter those out at chain creation time...
@@ -1136,12 +1083,8 @@ static bool apply_lookup_subtable(const LookupList *lookupList, GlyphArray* glyp
       break;
     case LigatureLookupType: {
       LigatureSubstitutionTable *ligatureSubstitutionTable = (LigatureSubstitutionTable *)genericSubstTable;
-      CoverageTable *coverageTable = (CoverageTable *)((uint8_t *)ligatureSubstitutionTable + ligatureSubstitutionTable->coverageOffset);
-      uint32_t size = 0;
-      uint16_t *coverage_array = build_coverage_array(coverageTable, &size);
       // Stop at the first one we apply
-      applied = apply_LigatureSubstitution(ligatureSubstitutionTable, glyph_array, *index, coverage_array);
-      free(coverage_array);
+      applied = apply_LigatureSubstitution(ligatureSubstitutionTable, glyph_array, *index);
       break;
     }
     case ContextLookupType: {
@@ -1162,12 +1105,8 @@ static bool apply_lookup_subtable(const LookupList *lookupList, GlyphArray* glyp
     }
     case ReverseChainingContextSingleLookupType: {
       ReverseChainSingleSubstFormat1 *reverseChain = (ReverseChainSingleSubstFormat1 *)genericSubstTable;
-      CoverageTable *coverageTable = (CoverageTable *)((uint8_t *)reverseChain + reverseChain->coverageOffset);
-      uint32_t size = 0;
-      uint16_t *coverage_array = build_coverage_array(coverageTable, &size);
       // Stop at the first one we apply
-      applied = apply_ReverseChainingContextSingleLookupType(reverseChain, glyph_array, (glyph_array->len - *index - 1), coverage_array, size);
-      free(coverage_array);
+      applied = apply_ReverseChainingContextSingleLookupType(reverseChain, glyph_array, (glyph_array->len - *index - 1));
       break;
     }
     default:
