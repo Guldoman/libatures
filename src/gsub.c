@@ -220,6 +220,12 @@ enum {
 } SingleSubstitutionFormats;
 
 enum {
+  SequenceContextFormat_1 = 1,
+  SequenceContextFormat_2,
+  SequenceContextFormat_3
+} SequenceContextFormats;
+
+enum {
   ChainedSequenceContextFormat_1 = 1,
   ChainedSequenceContextFormat_2,
   ChainedSequenceContextFormat_3
@@ -693,6 +699,116 @@ static bool check_with_Class(const GlyphArray *glyph_array, size_t index, const 
 
 static void apply_Lookup_index(const LookupList *lookupList, const LookupTable *lookupTable, GlyphArray* glyph_array, size_t *index);
 
+static bool apply_SequenceSubstitution(const LookupList *lookupList, const GenericSequenceContextFormat *genericSequence, GlyphArray* glyph_array, size_t *index) {
+  switch (genericSequence->format) {
+    case SequenceContextFormat_1: {
+      fprintf(stderr, "Unsupported SequenceContextFormat %d\n", genericSequence->format);
+      break;
+    }
+    case SequenceContextFormat_2: {
+      SequenceContextFormat2 *sequenceContext = (SequenceContextFormat2 *)genericSequence;
+      CoverageTable *coverageTable = (CoverageTable *)((uint8_t *)sequenceContext + sequenceContext->coverageOffset);
+      uint32_t coverage_size = 0;
+      uint16_t *coverage_array = build_coverage_array(coverageTable, &coverage_size);
+      bool applicable = false;
+      // TODO: the commented check isn't needed, right?
+      for (uint32_t i = 0; i < coverage_size/* && i < chainedSequenceContext->chainedClassSeqRuleSetCount*/; i++) {
+        if(glyph_array->array[*index] == coverage_array[i]) {
+          applicable = true;
+          break;
+        }
+      }
+      free(coverage_array);
+      if (!applicable) return false;
+
+      ClassDefGeneric *inputClassDef = (ClassDefGeneric *)((uint8_t *)sequenceContext + sequenceContext->classDefOffset);
+
+      uint32_t input_class_size = 0;
+      uint16_t *input_class_array = build_class_array(inputClassDef, &input_class_size);
+      uint16_t starting_class = input_class_array[glyph_array->array[*index]];
+      if (starting_class >= sequenceContext->classSeqRuleSetCount) {
+        // ??
+        free(input_class_array);
+        break;
+      }
+      const ClassSequenceRuleSet *ruleSet = (ClassSequenceRuleSet *)((uint8_t *)sequenceContext + sequenceContext->classSeqRuleSetOffsets[starting_class]);
+      if (ruleSet == NULL) {
+        free(input_class_array);
+        break;
+      }
+
+      bool applied = false;
+      for (uint16_t i = 0; i < ruleSet->classSeqRuleCount; i++) {
+        const ClassSequenceRule *sequenceRule = (ClassSequenceRule *)((uint8_t *)ruleSet + ruleSet->classSeqRuleOffsets[i]);
+
+        if (*index + sequenceRule->glyphCount > glyph_array->len) {
+          continue;
+        }
+        // The sequenceRule doesn't include the initial glyph.
+        if(!check_with_Class(glyph_array, *index + 1, input_class_array, input_class_size, (GenericArray *)((uint8_t *)sequenceRule + 1 * sizeof(uint16_t)), sequenceRule->glyphCount - 1, +1)) {
+          continue;
+        }
+
+        GlyphArray *input_ga = GlyphArray_new(sequenceRule->glyphCount);
+        GlyphArray_append(input_ga, &glyph_array->array[*index], sequenceRule->glyphCount);
+        const SequenceLookupRecord *seqLookupRecords = (SequenceLookupRecord *)((uint8_t *)sequenceRule + (1 + sequenceRule->glyphCount) * sizeof(uint16_t));
+        for (uint16_t i = 0; i < sequenceRule->seqLookupCount; i++) {
+          const SequenceLookupRecord *sequenceLookupRecord = &seqLookupRecords[i];
+          const LookupTable *lookup = get_lookup(lookupList, sequenceLookupRecord->lookupListIndex);
+          size_t input_index = sequenceLookupRecord->sequenceIndex;
+          apply_Lookup_index(lookupList, lookup, input_ga, &input_index);
+        }
+        GlyphArray_set(glyph_array, *index + input_ga->len, &glyph_array->array[*index + sequenceRule->glyphCount], glyph_array->len - (*index + sequenceRule->glyphCount));
+        GlyphArray_set(glyph_array, *index, input_ga->array, input_ga->len);
+        if (input_ga->len < sequenceRule->glyphCount) {
+          GlyphArray_shrink(glyph_array, sequenceRule->glyphCount - input_ga->len);
+        }
+        *index += input_ga->len - 1; // ++ will be done by apply_Lookup
+        GlyphArray_free(input_ga);
+
+        // Only use the first one that matches.
+        applied = true;
+        break;
+      }
+      free(input_class_array);
+      return applied;
+    }
+    case SequenceContextFormat_3: {
+      const SequenceContextFormat3 *sequenceContext = (SequenceContextFormat3 *)genericSequence;
+
+      if (*index + sequenceContext->glyphCount > glyph_array->len) {
+        return false;
+      }
+      if (!check_with_Coverage(glyph_array, *index, (uint8_t *)genericSequence, (GenericArray *)((uint8_t *)sequenceContext + sizeof(uint16_t) * 2), sequenceContext->glyphCount, +1)) {
+        return false;
+      }
+
+      GlyphArray *input_ga = GlyphArray_new(sequenceContext->glyphCount);
+      GlyphArray_append(input_ga, &glyph_array->array[*index], sequenceContext->glyphCount);
+      const SequenceLookupRecord *seqLookupRecords = (SequenceLookupRecord *)((uint8_t *)sequenceContext + (2 + sequenceContext->glyphCount + 1) * sizeof(uint16_t));
+      for (uint16_t i = 0; i < sequenceContext->seqLookupCount; i++) {
+        const SequenceLookupRecord *sequenceLookupRecord = &seqLookupRecords[i];
+        const LookupTable *lookup = get_lookup(lookupList, sequenceLookupRecord->lookupListIndex);
+        size_t input_index = sequenceLookupRecord->sequenceIndex;
+        apply_Lookup_index(lookupList, lookup, input_ga, &input_index);
+      }
+      GlyphArray_set(glyph_array, *index + input_ga->len, &(glyph_array->array[*index + sequenceContext->glyphCount]), glyph_array->len - (*index + sequenceContext->glyphCount));
+      GlyphArray_set(glyph_array, *index, input_ga->array, input_ga->len);
+      if (input_ga->len < sequenceContext->glyphCount) {
+        GlyphArray_shrink(glyph_array, sequenceContext->glyphCount - input_ga->len);
+      }
+      *index += input_ga->len - 1; // ++ will be done by apply_Lookup
+      GlyphArray_free(input_ga);
+      return true;
+      break;
+    }
+    default:
+      fprintf(stderr, "UNKNOWN SequenceContextFormat %d\n", genericSequence->format);
+      break;
+  }
+  return false;
+}
+
 static bool apply_ChainedSequenceSubstitution(const LookupList *lookupList, const GenericChainedSequenceContextFormat *genericChainedSequence, GlyphArray* glyph_array, size_t *index) {
   switch (genericChainedSequence->format) {
     case ChainedSequenceContextFormat_1: {
@@ -982,9 +1098,11 @@ static bool apply_lookup_subtable(const LookupList *lookupList, GlyphArray* glyp
       free(coverage_array);
       break;
     }
-    case ContextLookupType:
-      fprintf(stderr, "ContextLookupType %d unsupported\n", genericSubstTable->substFormat);
+    case ContextLookupType: {
+      GenericSequenceContextFormat *genericSequence = (GenericSequenceContextFormat *)genericSubstTable;
+      applied = apply_SequenceSubstitution(lookupList, genericSequence, glyph_array, index);
       break;
+    }
     case ChainingLookupType: {
       GenericChainedSequenceContextFormat *genericChainedSequence = (GenericChainedSequenceContextFormat *)genericSubstTable;
       applied = apply_ChainedSequenceSubstitution(lookupList, genericChainedSequence, glyph_array, index);

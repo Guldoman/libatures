@@ -85,7 +85,7 @@ typedef struct packed_BE {
 typedef struct packed_BE {
   uint16_t coverageFormat;
   uint16_t count;
-  uint16_t array;
+  uint16_t array[];
 } CoverageTable;
 
 typedef struct packed_BE {
@@ -211,6 +211,18 @@ typedef struct packed_BE {
   uint16_t classSeqRuleSetCount;
   uint16_t classSeqRuleSetOffsets[];
 } SequenceContextFormat2;
+
+typedef struct packed_BE {
+  uint16_t classSeqRuleCount;
+  uint16_t classSeqRuleOffsets[];
+} ClassSequenceRuleSet;
+
+typedef struct packed_BE {
+  uint16_t glyphCount;
+  uint16_t seqLookupCount;
+  uint16_t inputSequence[/* glyphCount - 1 */];
+  // SequenceLookupRecord seqLookupRecords[/* seqLookupCount */];
+} ClassSequenceRule;
 
 typedef struct packed_BE {
   uint16_t format;
