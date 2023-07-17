@@ -782,15 +782,18 @@ static bool apply_ChainedSequenceSubstitution(const LookupList *lookupList, cons
       uint16_t starting_class = input_class_array[glyph_array->array[*index]];
       if (starting_class >= chainedSequenceContext->chainedClassSeqRuleSetCount) {
         // ??
+        free(input_class_array);
         break;
       }
       const ChainedClassSequenceRuleSet *chainedRuleSet = (ChainedClassSequenceRuleSet *)((uint8_t *)chainedSequenceContext + chainedSequenceContext->chainedClassSeqRuleSetOffsets[starting_class]);
       if (chainedRuleSet == NULL) {
+        free(input_class_array);
         break;
       }
       uint16_t *backtrack_class_array = build_class_array(backtrackClassDef, &backtrack_class_size);
       uint16_t *lookahead_class_array = build_class_array(lookaheadClassDef, &lookahead_class_size);
-      
+
+      bool applied = false;
       for (uint16_t i = 0; i < chainedRuleSet->chainedClassSeqRuleCount; i++) {
         const ChainedClassSequenceRule *chainedClassSequenceRule = (ChainedClassSequenceRule *)((uint8_t *)chainedRuleSet + chainedRuleSet->chainedClassSeqRuleOffsets[i]);
         const ChainedClassSequenceRule_backtrack *backtrackSequenceRule = (ChainedClassSequenceRule_backtrack *)chainedClassSequenceRule;
@@ -832,12 +835,13 @@ static bool apply_ChainedSequenceSubstitution(const LookupList *lookupList, cons
         GlyphArray_free(input_ga);
 
         // Only use the first one that matches.
-        return true;
+        applied = true;
+        break;
       }
       free(input_class_array);
       free(backtrack_class_array);
       free(lookahead_class_array);
-      break;
+      return applied;
     }
     case ChainedSequenceContextFormat_3: {
       const ChainedSequenceContextFormat3_backtrack *backtrackCoverage = (ChainedSequenceContextFormat3_backtrack *)((uint8_t *)genericChainedSequence + sizeof(uint16_t));
