@@ -1002,7 +1002,7 @@ static bool apply_lookup_subtable(const LookupList *lookupList, GlyphArray* glyp
       uint32_t size = 0;
       uint16_t *coverage_array = build_coverage_array(coverageTable, &size);
       // Stop at the first one we apply
-      applied = apply_ReverseChainingContextSingleLookupType(reverseChain, glyph_array, *index, coverage_array, size);
+      applied = apply_ReverseChainingContextSingleLookupType(reverseChain, glyph_array, (glyph_array->len - *index - 1), coverage_array, size);
       free(coverage_array);
       break;
     }
