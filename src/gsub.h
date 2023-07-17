@@ -205,6 +205,18 @@ typedef struct packed_BE {
 } SequenceContextFormat1;
 
 typedef struct packed_BE {
+  uint16_t seqRuleCount;
+  uint16_t seqRuleOffsets[];
+} SequenceRuleSet;
+
+typedef struct packed_BE {
+  uint16_t glyphCount;
+  uint16_t seqLookupCount;
+  uint16_t inputSequence[/* seqLookupCount - 1 */];
+  //SequenceLookupRecord seqLookupRecords[/* seqLookupCount */];
+} SequenceRule;
+
+typedef struct packed_BE {
   uint16_t format;
   uint16_t coverageOffset;
   uint16_t classDefOffset;

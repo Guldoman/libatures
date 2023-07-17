@@ -352,7 +352,7 @@ static size_t get_lookups(const LangSysTable* langSysTable, const FeatureList *f
       uint16_t index = langSysTable->featureIndices[j];
       const FeatureTable *featureTable = get_feature(featureList, index, &featureTag);
       if (featureTable == NULL) {
-        printf("Warning: unable to obtain feature#%d\n", index);
+        fprintf(stderr, "Warning: unable to obtain feature#%d\n", index);
         // Try with next feature
         continue;
       }
@@ -702,7 +702,53 @@ static void apply_Lookup_index(const LookupList *lookupList, const LookupTable *
 static bool apply_SequenceSubstitution(const LookupList *lookupList, const GenericSequenceContextFormat *genericSequence, GlyphArray* glyph_array, size_t *index) {
   switch (genericSequence->format) {
     case SequenceContextFormat_1: {
-      fprintf(stderr, "Unsupported SequenceContextFormat %d\n", genericSequence->format);
+      SequenceContextFormat1 *sequenceContext = (SequenceContextFormat1 *)genericSequence;
+      CoverageTable *coverageTable = (CoverageTable *)((uint8_t *)sequenceContext + sequenceContext->coverageOffset);
+      uint32_t size = 0;
+      uint16_t *coverage_array = build_coverage_array(coverageTable, &size);
+      bool applicable = false;
+      uint32_t coverage_index;
+      for (uint32_t i = 0; i < size && i < sequenceContext->seqRuleSetCount; i++) {
+        if(glyph_array->array[*index] == coverage_array[i]) {
+          coverage_index = i;
+          applicable = true;
+          break;
+        }
+      }
+      free(coverage_array);
+      if (!applicable) return false;
+
+      SequenceRuleSet *sequenceRuleSet = (SequenceRuleSet *)((uint8_t *)sequenceContext + sequenceContext->seqRuleSetOffsets[coverage_index]);
+
+      for (uint16_t i = 0; i < sequenceRuleSet->seqRuleCount; i++) {
+        const SequenceRule *sequenceRule = (SequenceRule *)((uint8_t *)sequenceRuleSet + sequenceRuleSet->seqRuleOffsets[i]);
+
+        if (*index + sequenceRule->glyphCount > glyph_array->len) {
+          continue;
+        }
+        // The inputSequence doesn't include the initial glyph.
+        if(!check_with_Sequence(glyph_array, *index + 1, (GenericArray *)sequenceRule, sequenceRule->glyphCount - 1, +1)) {
+          continue;
+        }
+
+        GlyphArray *input_ga = GlyphArray_new(sequenceRule->glyphCount);
+        GlyphArray_append(input_ga, &glyph_array->array[*index], sequenceRule->glyphCount);
+        const SequenceLookupRecord *seqLookupRecords = (SequenceLookupRecord *)((uint8_t *)sequenceRule + (1 + sequenceRule->glyphCount) * sizeof(uint16_t));
+        for (uint16_t i = 0; i < sequenceRule->seqLookupCount; i++) {
+          const SequenceLookupRecord *sequenceLookupRecord = &seqLookupRecords[i];
+          const LookupTable *lookup = get_lookup(lookupList, sequenceLookupRecord->lookupListIndex);
+          size_t input_index = sequenceLookupRecord->sequenceIndex;
+          apply_Lookup_index(lookupList, lookup, input_ga, &input_index);
+        }
+        GlyphArray_set(glyph_array, *index + input_ga->len, &glyph_array->array[*index + sequenceRule->glyphCount], glyph_array->len - (*index + sequenceRule->glyphCount));
+        GlyphArray_set(glyph_array, *index, input_ga->array, input_ga->len);
+        if (input_ga->len < sequenceRule->glyphCount) {
+          GlyphArray_shrink(glyph_array, sequenceRule->glyphCount - input_ga->len);
+        }
+        *index += input_ga->len - 1; // ++ will be done by apply_Lookup
+        GlyphArray_free(input_ga);
+        return true;
+      }
       break;
     }
     case SequenceContextFormat_2: {
