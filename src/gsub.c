@@ -445,6 +445,7 @@ fail:
 }
 
 void destroy_chain(Chain *chain) {
+  if (chain == NULL) return;
   FT_OpenType_Free(chain->face, chain->GSUB_table);
   free(chain->lookupsArray);
   free(chain);
