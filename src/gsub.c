@@ -201,6 +201,7 @@ void test_GlyphArray(FT_Face face) {
 const char DFLT_tag[4] = {'D', 'F', 'L', 'T'};
 const char dflt_tag[4] = {'d', 'f', 'l', 't'};
 const char _RQD_tag[4] = {' ', 'R', 'Q', 'D'};
+const char latn_tag[4] = {'l', 'a', 't', 'n'};
 
 enum {
   SingleLookupType = 1,
@@ -373,7 +374,7 @@ static size_t get_lookups(const LangSysTable* langSysTable, const FeatureList *f
     for (uint16_t i = 0, j = 0; i < lookupList->lookupCount; i++) {
       if (lookups_map[i]) {
         _lookups[j] = get_lookup(lookupList, i);
-        printf("%d -> %d\n", j, i);
+        ///printf("%d -> %d\n", j, i);
         j++;
       }
     }
@@ -407,11 +408,17 @@ Chain *generate_chain(FT_Face face, const char (*script)[4], const char (*lang)[
   }
 
   const GsubHeader *gsubHeader = (GsubHeader *)GSUB_table;
+
   const ScriptList *scriptList = (ScriptList *)((uint8_t *)gsubHeader + gsubHeader->scriptListOffset);
   const ScriptTable *scriptTable = get_script_table(scriptList, script);
+  // Try again with latn, as some fonts don't define the default script.
+  if (scriptTable == NULL && script == NULL) {
+    scriptTable = get_script_table(scriptList, &latn_tag);
+  }
   if (scriptTable == NULL) {
     goto fail;
   }
+
   const LangSysTable *langSysTable = get_lang_table(scriptTable, lang);
   if (langSysTable == NULL) {
     goto fail;
