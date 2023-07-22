@@ -455,6 +455,7 @@ GlyphArray *GlyphArray_new_from_utf8(FT_Face face, const char *string, size_t le
 GlyphArray *GlyphArray_new_from_data(uint16_t *data, size_t len);
 bool GlyphArray_set(GlyphArray *glyph_array, size_t from, const uint16_t *data, size_t data_size);
 bool GlyphArray_append(GlyphArray *glyph_array, const uint16_t *data, size_t data_size);
+bool GlyphArray_put(GlyphArray *dst, size_t dst_index, GlyphArray *src, size_t src_index, size_t len);
 bool GlyphArray_shrink(GlyphArray *glyph_array, size_t reduction);
 bool GlyphArray_compare(GlyphArray *ga1, GlyphArray *ga2);
 void GlyphArray_free(GlyphArray *ga);

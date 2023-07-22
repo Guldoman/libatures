@@ -72,6 +72,11 @@ bool GlyphArray_set(GlyphArray *glyph_array, size_t from, const uint16_t *data, 
   return true;
 }
 
+bool GlyphArray_put(GlyphArray *dst, size_t dst_index, GlyphArray *src, size_t src_index, size_t len) {
+  if (src_index + len > src->len) return false;
+  return GlyphArray_set(dst, dst_index, &src->array[src_index], len);
+}
+
 bool GlyphArray_shrink(GlyphArray *glyph_array, size_t reduction) {
   GlyphArray *ga = glyph_array;
   if (reduction > ga->len) {
@@ -628,7 +633,7 @@ static bool apply_MultipleSubstitution(const MultipleSubstFormat1 *multipleSubst
   if (!applicable || coverage_index >= multipleSubstFormat->sequenceCount) return false;
 
   SequenceTable *sequenceTable = (SequenceTable *)((uint8_t *)multipleSubstFormat + multipleSubstFormat->sequenceOffsets[coverage_index]);
-  GlyphArray_set(glyph_array, *index + sequenceTable->glyphCount - 1, &glyph_array->array[*index], glyph_array->len - *index - 1);
+  GlyphArray_put(glyph_array, *index + sequenceTable->glyphCount - 1, glyph_array, *index, glyph_array->len - *index - 1);
   for (uint16_t j = 0; j < sequenceTable->glyphCount; j++) {
     glyph_array->array[*index + j] = sequenceTable->substituteGlyphIDs[j];
   }
@@ -665,7 +670,7 @@ static bool apply_LigatureSubstitution(LigatureSubstitutionTable *ligatureSubsti
   if (ligature != NULL) {
     // printf("FOUND ->%d\n", ligature->ligatureGlyph);
     glyph_array->array[index] = ligature->ligatureGlyph;
-    GlyphArray_set(glyph_array, index + 1, &glyph_array->array[index + ligature->componentCount], glyph_array->len - (index + ligature->componentCount));
+    GlyphArray_put(glyph_array, index + 1, glyph_array, index + ligature->componentCount, glyph_array->len - (index + ligature->componentCount));
     GlyphArray_shrink(glyph_array, ligature->componentCount - 1);
     return true;
   }
