@@ -716,6 +716,24 @@ static bool check_with_Class(const GlyphArray *glyph_array, size_t index, const 
 
 static void apply_Lookup_index(const LookupList *lookupList, const LookupTable *lookupTable, GlyphArray* glyph_array, size_t *index);
 
+static void apply_sequence_rule(const LookupList *lookupList, uint16_t glyphCount, const SequenceLookupRecord *seqLookupRecords, uint16_t seqLookupCount, GlyphArray *glyph_array, size_t *index) {
+  GlyphArray *input_ga = GlyphArray_new(glyphCount);
+  GlyphArray_append(input_ga, &glyph_array->array[*index], glyphCount);
+  for (uint16_t i = 0; i < seqLookupCount; i++) {
+    const SequenceLookupRecord *sequenceLookupRecord = &seqLookupRecords[i];
+    const LookupTable *lookup = get_lookup(lookupList, sequenceLookupRecord->lookupListIndex);
+    size_t input_index = sequenceLookupRecord->sequenceIndex;
+    apply_Lookup_index(lookupList, lookup, input_ga, &input_index);
+  }
+  GlyphArray_put(glyph_array, *index + input_ga->len, glyph_array, *index + glyphCount, glyph_array->len - (*index + glyphCount));
+  GlyphArray_put(glyph_array, *index, input_ga, 0, input_ga->len);
+  if (input_ga->len < glyphCount) {
+    GlyphArray_shrink(glyph_array, glyphCount - input_ga->len);
+  }
+  *index += input_ga->len - 1; // ++ will be done by apply_Lookup
+  GlyphArray_free(input_ga);
+}
+
 static bool apply_SequenceSubstitution(const LookupList *lookupList, const GenericSequenceContextFormat *genericSequence, GlyphArray* glyph_array, size_t *index) {
   switch (genericSequence->format) {
     case SequenceContextFormat_1: {
@@ -737,23 +755,8 @@ static bool apply_SequenceSubstitution(const LookupList *lookupList, const Gener
         if(!check_with_Sequence(glyph_array, *index + 1, (GenericArray *)sequenceRule, sequenceRule->glyphCount - 1, +1)) {
           continue;
         }
-
-        GlyphArray *input_ga = GlyphArray_new(sequenceRule->glyphCount);
-        GlyphArray_append(input_ga, &glyph_array->array[*index], sequenceRule->glyphCount);
         const SequenceLookupRecord *seqLookupRecords = (SequenceLookupRecord *)((uint8_t *)sequenceRule + (1 + sequenceRule->glyphCount) * sizeof(uint16_t));
-        for (uint16_t i = 0; i < sequenceRule->seqLookupCount; i++) {
-          const SequenceLookupRecord *sequenceLookupRecord = &seqLookupRecords[i];
-          const LookupTable *lookup = get_lookup(lookupList, sequenceLookupRecord->lookupListIndex);
-          size_t input_index = sequenceLookupRecord->sequenceIndex;
-          apply_Lookup_index(lookupList, lookup, input_ga, &input_index);
-        }
-        GlyphArray_set(glyph_array, *index + input_ga->len, &glyph_array->array[*index + sequenceRule->glyphCount], glyph_array->len - (*index + sequenceRule->glyphCount));
-        GlyphArray_set(glyph_array, *index, input_ga->array, input_ga->len);
-        if (input_ga->len < sequenceRule->glyphCount) {
-          GlyphArray_shrink(glyph_array, sequenceRule->glyphCount - input_ga->len);
-        }
-        *index += input_ga->len - 1; // ++ will be done by apply_Lookup
-        GlyphArray_free(input_ga);
+        apply_sequence_rule(lookupList, sequenceRule->glyphCount, seqLookupRecords, sequenceRule->seqLookupCount, glyph_array, index);
         return true;
       }
       break;
@@ -777,7 +780,6 @@ static bool apply_SequenceSubstitution(const LookupList *lookupList, const Gener
         break;
       }
 
-      bool applied = false;
       for (uint16_t i = 0; i < ruleSet->classSeqRuleCount; i++) {
         const ClassSequenceRule *sequenceRule = (ClassSequenceRule *)((uint8_t *)ruleSet + ruleSet->classSeqRuleOffsets[i]);
 
@@ -789,28 +791,12 @@ static bool apply_SequenceSubstitution(const LookupList *lookupList, const Gener
           continue;
         }
 
-        GlyphArray *input_ga = GlyphArray_new(sequenceRule->glyphCount);
-        GlyphArray_append(input_ga, &glyph_array->array[*index], sequenceRule->glyphCount);
         const SequenceLookupRecord *seqLookupRecords = (SequenceLookupRecord *)((uint8_t *)sequenceRule + (1 + sequenceRule->glyphCount) * sizeof(uint16_t));
-        for (uint16_t i = 0; i < sequenceRule->seqLookupCount; i++) {
-          const SequenceLookupRecord *sequenceLookupRecord = &seqLookupRecords[i];
-          const LookupTable *lookup = get_lookup(lookupList, sequenceLookupRecord->lookupListIndex);
-          size_t input_index = sequenceLookupRecord->sequenceIndex;
-          apply_Lookup_index(lookupList, lookup, input_ga, &input_index);
-        }
-        GlyphArray_set(glyph_array, *index + input_ga->len, &glyph_array->array[*index + sequenceRule->glyphCount], glyph_array->len - (*index + sequenceRule->glyphCount));
-        GlyphArray_set(glyph_array, *index, input_ga->array, input_ga->len);
-        if (input_ga->len < sequenceRule->glyphCount) {
-          GlyphArray_shrink(glyph_array, sequenceRule->glyphCount - input_ga->len);
-        }
-        *index += input_ga->len - 1; // ++ will be done by apply_Lookup
-        GlyphArray_free(input_ga);
-
+        apply_sequence_rule(lookupList, sequenceRule->glyphCount, seqLookupRecords, sequenceRule->seqLookupCount, glyph_array, index);
         // Only use the first one that matches.
-        applied = true;
-        break;
+        return true;
       }
-      return applied;
+      break;
     }
     case SequenceContextFormat_3: {
       const SequenceContextFormat3 *sequenceContext = (SequenceContextFormat3 *)genericSequence;
@@ -825,21 +811,8 @@ static bool apply_SequenceSubstitution(const LookupList *lookupList, const Gener
       GlyphArray *input_ga = GlyphArray_new(sequenceContext->glyphCount);
       GlyphArray_append(input_ga, &glyph_array->array[*index], sequenceContext->glyphCount);
       const SequenceLookupRecord *seqLookupRecords = (SequenceLookupRecord *)((uint8_t *)sequenceContext + (2 + sequenceContext->glyphCount + 1) * sizeof(uint16_t));
-      for (uint16_t i = 0; i < sequenceContext->seqLookupCount; i++) {
-        const SequenceLookupRecord *sequenceLookupRecord = &seqLookupRecords[i];
-        const LookupTable *lookup = get_lookup(lookupList, sequenceLookupRecord->lookupListIndex);
-        size_t input_index = sequenceLookupRecord->sequenceIndex;
-        apply_Lookup_index(lookupList, lookup, input_ga, &input_index);
-      }
-      GlyphArray_set(glyph_array, *index + input_ga->len, &(glyph_array->array[*index + sequenceContext->glyphCount]), glyph_array->len - (*index + sequenceContext->glyphCount));
-      GlyphArray_set(glyph_array, *index, input_ga->array, input_ga->len);
-      if (input_ga->len < sequenceContext->glyphCount) {
-        GlyphArray_shrink(glyph_array, sequenceContext->glyphCount - input_ga->len);
-      }
-      *index += input_ga->len - 1; // ++ will be done by apply_Lookup
-      GlyphArray_free(input_ga);
+      apply_sequence_rule(lookupList, sequenceContext->glyphCount, seqLookupRecords, sequenceContext->seqLookupCount, glyph_array, index);
       return true;
-      break;
     }
     default:
       fprintf(stderr, "UNKNOWN SequenceContextFormat %d\n", genericSequence->format);
@@ -883,21 +856,7 @@ static bool apply_ChainedSequenceSubstitution(const LookupList *lookupList, cons
           continue;
         }
 
-        GlyphArray *input_ga = GlyphArray_new(inputSequenceRule->inputGlyphCount);
-        GlyphArray_append(input_ga, &glyph_array->array[*index], inputSequenceRule->inputGlyphCount);
-        for (uint16_t i = 0; i < sequenceRule->seqLookupCount; i++) {
-          const SequenceLookupRecord *sequenceLookupRecord = &sequenceRule->seqLookupRecords[i];
-          const LookupTable *lookup = get_lookup(lookupList, sequenceLookupRecord->lookupListIndex);
-          size_t input_index = sequenceLookupRecord->sequenceIndex;
-          apply_Lookup_index(lookupList, lookup, input_ga, &input_index);
-        }
-        GlyphArray_set(glyph_array, *index + input_ga->len, &glyph_array->array[*index + inputSequenceRule->inputGlyphCount], glyph_array->len - (*index + inputSequenceRule->inputGlyphCount));
-        GlyphArray_set(glyph_array, *index, input_ga->array, input_ga->len);
-        if (input_ga->len < inputSequenceRule->inputGlyphCount) {
-          GlyphArray_shrink(glyph_array, inputSequenceRule->inputGlyphCount - input_ga->len);
-        }
-        *index += input_ga->len - 1; // ++ will be done by apply_Lookup
-        GlyphArray_free(input_ga);
+        apply_sequence_rule(lookupList, inputSequenceRule->inputGlyphCount, sequenceRule->seqLookupRecords, sequenceRule->seqLookupCount, glyph_array, index);
         return true;
       }
       break;
@@ -924,7 +883,6 @@ static bool apply_ChainedSequenceSubstitution(const LookupList *lookupList, cons
         break;
       }
 
-      bool applied = false;
       for (uint16_t i = 0; i < chainedRuleSet->chainedClassSeqRuleCount; i++) {
         const ChainedClassSequenceRule *chainedClassSequenceRule = (ChainedClassSequenceRule *)((uint8_t *)chainedRuleSet + chainedRuleSet->chainedClassSeqRuleOffsets[i]);
         const ChainedClassSequenceRule_backtrack *backtrackSequenceRule = (ChainedClassSequenceRule_backtrack *)chainedClassSequenceRule;
@@ -949,27 +907,11 @@ static bool apply_ChainedSequenceSubstitution(const LookupList *lookupList, cons
           continue;
         }
 
-        GlyphArray *input_ga = GlyphArray_new(inputSequenceRule->inputGlyphCount);
-        GlyphArray_append(input_ga, &glyph_array->array[*index], inputSequenceRule->inputGlyphCount);
-        for (uint16_t i = 0; i < sequenceRule->seqLookupCount; i++) {
-          const SequenceLookupRecord *sequenceLookupRecord = &sequenceRule->seqLookupRecords[i];
-          const LookupTable *lookup = get_lookup(lookupList, sequenceLookupRecord->lookupListIndex);
-          size_t input_index = sequenceLookupRecord->sequenceIndex;
-          apply_Lookup_index(lookupList, lookup, input_ga, &input_index);
-        }
-        GlyphArray_set(glyph_array, *index + input_ga->len, &glyph_array->array[*index + inputSequenceRule->inputGlyphCount], glyph_array->len - (*index + inputSequenceRule->inputGlyphCount));
-        GlyphArray_set(glyph_array, *index, input_ga->array, input_ga->len);
-        if (input_ga->len < inputSequenceRule->inputGlyphCount) {
-          GlyphArray_shrink(glyph_array, inputSequenceRule->inputGlyphCount - input_ga->len);
-        }
-        *index += input_ga->len - 1; // ++ will be done by apply_Lookup
-        GlyphArray_free(input_ga);
-
+        apply_sequence_rule(lookupList, inputSequenceRule->inputGlyphCount, sequenceRule->seqLookupRecords, sequenceRule->seqLookupCount, glyph_array, index);
         // Only use the first one that matches.
-        applied = true;
-        break;
+        return true;
       }
-      return applied;
+      break;
     }
     case ChainedSequenceContextFormat_3: {
       const ChainedSequenceContextFormat3_backtrack *backtrackCoverage = (ChainedSequenceContextFormat3_backtrack *)((uint8_t *)genericChainedSequence + sizeof(uint16_t));
@@ -996,21 +938,7 @@ static bool apply_ChainedSequenceSubstitution(const LookupList *lookupList, cons
 
       if (inputCoverage->inputGlyphCount == 0) return true;
 
-      GlyphArray *input_ga = GlyphArray_new(inputCoverage->inputGlyphCount);
-      GlyphArray_append(input_ga, &glyph_array->array[*index], inputCoverage->inputGlyphCount);
-      for (uint16_t i = 0; i < seqCoverage->seqLookupCount; i++) {
-        const SequenceLookupRecord *sequenceLookupRecord = &seqCoverage->seqLookupRecords[i];
-        const LookupTable *lookup = get_lookup(lookupList, sequenceLookupRecord->lookupListIndex);
-        size_t input_index = sequenceLookupRecord->sequenceIndex;
-        apply_Lookup_index(lookupList, lookup, input_ga, &input_index);
-      }
-      GlyphArray_set(glyph_array, *index + input_ga->len, &(glyph_array->array[*index + inputCoverage->inputGlyphCount]), glyph_array->len - (*index + inputCoverage->inputGlyphCount));
-      GlyphArray_set(glyph_array, *index, input_ga->array, input_ga->len);
-      if (input_ga->len < inputCoverage->inputGlyphCount) {
-        GlyphArray_shrink(glyph_array, inputCoverage->inputGlyphCount - input_ga->len);
-      }
-      *index += input_ga->len - 1; // ++ will be done by apply_Lookup
-      GlyphArray_free(input_ga);
+      apply_sequence_rule(lookupList, inputCoverage->inputGlyphCount, seqCoverage->seqLookupRecords, seqCoverage->seqLookupCount, glyph_array, index);
       return true;
     }
     default:
