@@ -200,6 +200,61 @@ void test_GlyphArray(FT_Face face) {
 
 /** +++++++++++++++++++++++ **/
 
+// https://github.com/google/cityhash/blob/f5dc54147fcce12cefd16548c8e760d68ac04226/src/city.cc#L50-L94
+#ifdef _MSC_VER
+
+#include <stdlib.h>
+#define bswap_16(x) _byteswap_ushort(x)
+#define bswap_32(x) _byteswap_ulong(x)
+
+#elif defined(__APPLE__)
+
+// Mac OS X / Darwin features
+#include <libkern/OSByteOrder.h>
+#define bswap_16(x) OSSwapInt16(x)
+#define bswap_32(x) OSSwapInt32(x)
+
+#elif defined(__sun) || defined(sun)
+
+#include <sys/byteorder.h>
+#define bswap_16(x) BSWAP_16(x)
+#define bswap_32(x) BSWAP_32(x)
+
+#elif defined(__FreeBSD__)
+
+#include <sys/endian.h>
+#define bswap_16(x) bswap16(x)
+#define bswap_32(x) bswap32(x)
+
+#elif defined(__OpenBSD__)
+
+#include <sys/types.h>
+#define bswap_16(x) swap16(x)
+#define bswap_32(x) swap32(x)
+
+#elif defined(__NetBSD__)
+
+#include <sys/types.h>
+#include <machine/bswap.h>
+#if defined(__BSWAP_RENAME) && !defined(__bswap_32)
+#define bswap_16(x) bswap16(x)
+#define bswap_32(x) bswap32(x)
+#endif
+
+#else
+
+#include <byteswap.h>
+
+#endif
+
+#if ((__BYTE_ORDER__) == (__ORDER_LITTLE_ENDIAN__))
+#define parse_16(x) bswap_16(x)
+#define parse_32(x) bswap_32(x)
+#else
+#define parse_16(x) (x)
+#define parse_32(x) (x)
+#endif
+
 
 #define compare_tags(tag1, tag2) ((tag1)[0] == (tag2)[0] && (tag1)[1] == (tag2)[1] && (tag1)[2] == (tag2)[2] && (tag1)[3] == (tag2)[3])
 
@@ -249,9 +304,9 @@ enum {
 // Return the ScriptTable with the specified tag.
 // If the tag is NULL, the default script is returned.
 static const ScriptTable *get_script_table(const ScriptList *scriptList, const char (*script)[4]) {
-  for (uint16_t i = 0; i < scriptList->scriptCount; i++) {
+  for (uint16_t i = 0; i < parse_16(scriptList->scriptCount); i++) {
     const ScriptRecord *scriptRecord = &scriptList->scriptRecords[i];
-    const ScriptTable *scriptTable = (ScriptTable *)((uint8_t *)scriptList + scriptRecord->scriptOffset);
+    const ScriptTable *scriptTable = (ScriptTable *)((uint8_t *)scriptList + parse_16(scriptRecord->scriptOffset));
     if (script == NULL) {
       // In general, the uppercase version should be the one used
       if (compare_tags(DFLT_tag, scriptRecord->scriptTag)
@@ -270,8 +325,8 @@ static const ScriptTable *get_script_table(const ScriptList *scriptList, const c
 static const LangSysTable *get_lang_table(const ScriptTable *scriptTable, const char (*lang)[4]) {
   // Try to use the default language
   if (lang == NULL || compare_tags(DFLT_tag, *lang) || compare_tags(dflt_tag, *lang)) {
-    if (scriptTable->defaultLangSysOffset != 0) {
-      return (LangSysTable *)((uint8_t *)scriptTable + scriptTable->defaultLangSysOffset);
+    if (parse_16(scriptTable->defaultLangSysOffset) != 0) {
+      return (LangSysTable *)((uint8_t *)scriptTable + parse_16(scriptTable->defaultLangSysOffset));
     }
   }
 
@@ -284,23 +339,23 @@ static const LangSysTable *get_lang_table(const ScriptTable *scriptTable, const 
     return result;
   }
 
-  for (uint16_t i = 0; i < scriptTable->langSysCount; i++) {
+  for (uint16_t i = 0; i < parse_16(scriptTable->langSysCount); i++) {
     const LangSysRecord *langSysRecord = &scriptTable->langSysRecords[i];
     if (compare_tags(langSysRecord->langSysTag, *lang)) {
-      return (LangSysTable *)((uint8_t *)scriptTable + langSysRecord->langSysOffset);
+      return (LangSysTable *)((uint8_t *)scriptTable + parse_16(langSysRecord->langSysOffset));
     }
   }
 
-  return (LangSysTable *)NULL;
+  return NULL;
 }
 
 // Return the FeatureTable from the FeatureList at the specified index.
 // If featureTag is not NULL, it's set to the tag of the feature.
 static const FeatureTable *get_feature(const FeatureList *featureList, uint16_t index, char (*featureTag)[4]) {
-  if (index > featureList->featureCount) return (FeatureTable *)NULL;
+  if (index > parse_16(featureList->featureCount)) return NULL;
 
   const FeatureRecord *featureRecord = &(featureList->featureRecords[index]);
-  const FeatureTable *featureTable = (FeatureTable *)((uint8_t *)featureList + featureRecord->featureOffset);
+  const FeatureTable *featureTable = (FeatureTable *)((uint8_t *)featureList + parse_16(featureRecord->featureOffset));
   if (featureTag != NULL) {
     (*featureTag)[0] = featureRecord->featureTag[0];
     (*featureTag)[1] = featureRecord->featureTag[1];
@@ -311,8 +366,8 @@ static const FeatureTable *get_feature(const FeatureList *featureList, uint16_t 
 }
 
 static LookupTable *get_lookup(const LookupList *lookupList, uint16_t index) {
-  if (index > lookupList->lookupCount) return (LookupTable *) NULL;
-  return (LookupTable *)((uint8_t *)lookupList + lookupList->lookupOffsets[index]);
+  if (index > parse_16(lookupList->lookupCount)) return NULL;
+  return (LookupTable *)((uint8_t *)lookupList + parse_16(lookupList->lookupOffsets[index]));
 }
 
 
@@ -321,15 +376,16 @@ static LookupTable *get_lookup(const LookupList *lookupList, uint16_t index) {
 // all the pointers to lookups, or be NULL.
 static size_t get_lookups_from_feature(const FeatureTable *featureTable, const LookupList *lookupList, bool *lookups_map) {
   size_t c = 0;
-  for (uint16_t k = 0; k < featureTable->lookupIndexCount; k++) {
-    LookupTable *lookup = get_lookup(lookupList, featureTable->lookupListIndices[k]);
+  for (uint16_t k = 0; k < parse_16(featureTable->lookupIndexCount); k++) {
+    uint16_t lookup_index = parse_16(featureTable->lookupListIndices[k]);
+    LookupTable *lookup = get_lookup(lookupList, lookup_index);
     if (lookup == NULL) {
       fprintf(stderr, "Warning: unable to obtain lookup of feature\n");
       // Try with next feature
       continue;
     }
-    if (!lookups_map[featureTable->lookupListIndices[k]]) {
-      lookups_map[featureTable->lookupListIndices[k]] = true;
+    if (!lookups_map[lookup_index]) {
+      lookups_map[lookup_index] = true;
       c++;
     }
   }
@@ -341,21 +397,21 @@ static size_t get_lookups_from_feature(const FeatureTable *featureTable, const L
 // lookups must either be an array big enough to contain
 // all the pointers to lookups, or be NULL.
 static size_t get_lookups(const LangSysTable* langSysTable, const FeatureList *featureList, const LookupList *lookupList, const char (*features_enabled)[4], size_t nFeatures, LookupTable ***lookups) {
-  bool *lookups_map = calloc(lookupList->lookupCount, sizeof(bool));
+  bool *lookups_map = calloc(parse_16(lookupList->lookupCount), sizeof(bool));
   if (lookups_map == NULL) return 0;
 
   size_t c = 0;
   if (features_enabled == NULL) return 0;
 
   for (size_t i = 0; i < nFeatures; i++) {
-    if (langSysTable->requiredFeatureIndex != 0xFFFF && compare_tags(_RQD_tag, features_enabled[i])) {
-      const FeatureTable *featureTable = get_feature(featureList, langSysTable->requiredFeatureIndex, NULL);
+    if (parse_16(langSysTable->requiredFeatureIndex) != 0xFFFF && compare_tags(_RQD_tag, features_enabled[i])) {
+      const FeatureTable *featureTable = get_feature(featureList, parse_16(langSysTable->requiredFeatureIndex), NULL);
       c += get_lookups_from_feature(featureTable, lookupList, lookups_map);
       continue;
     }
-    for (uint16_t j = 0; j < langSysTable->featureIndexCount; j++) {
+    for (uint16_t j = 0; j < parse_16(langSysTable->featureIndexCount); j++) {
       char featureTag[4];
-      uint16_t index = langSysTable->featureIndices[j];
+      uint16_t index = parse_16(langSysTable->featureIndices[j]);
       const FeatureTable *featureTable = get_feature(featureList, index, &featureTag);
       if (featureTable == NULL) {
         fprintf(stderr, "Warning: unable to obtain feature#%d\n", index);
@@ -376,7 +432,7 @@ static size_t get_lookups(const LangSysTable* langSysTable, const FeatureList *f
       *lookups = NULL;
       goto end;
     }
-    for (uint16_t i = 0, j = 0; i < lookupList->lookupCount; i++) {
+    for (uint16_t i = 0, j = 0; i < parse_16(lookupList->lookupCount); i++) {
       if (lookups_map[i]) {
         _lookups[j] = get_lookup(lookupList, i);
         ///printf("%d -> %d\n", j, i);
@@ -414,7 +470,7 @@ Chain *generate_chain(FT_Face face, const char (*script)[4], const char (*lang)[
 
   const GsubHeader *gsubHeader = (GsubHeader *)GSUB_table;
 
-  const ScriptList *scriptList = (ScriptList *)((uint8_t *)gsubHeader + gsubHeader->scriptListOffset);
+  const ScriptList *scriptList = (ScriptList *)((uint8_t *)gsubHeader + parse_16(gsubHeader->scriptListOffset));
   const ScriptTable *scriptTable = get_script_table(scriptList, script);
   // Try again with latn, as some fonts don't define the default script.
   if (scriptTable == NULL && script == NULL) {
@@ -429,8 +485,9 @@ Chain *generate_chain(FT_Face face, const char (*script)[4], const char (*lang)[
     goto fail;
   }
 
-  const FeatureList *featureList = (FeatureList *)((uint8_t *)gsubHeader + gsubHeader->featureListOffset);
-  const LookupList *lookupList = (LookupList *)((uint8_t *)gsubHeader + gsubHeader->lookupListOffset);
+  const FeatureList *featureList = (FeatureList *)((uint8_t *)gsubHeader + parse_16(gsubHeader->featureListOffset));
+  const LookupList *lookupList = (LookupList *)((uint8_t *)gsubHeader + parse_16(gsubHeader->lookupListOffset));
+  ///printf("Total of %d lookups\n", parse_16(lookupList->lookupCount));
 
   size_t lookupCount = get_lookups(langSysTable, featureList, lookupList, features, n_features, &lookupsArray);
 
@@ -473,7 +530,7 @@ bool get_required_feature(const FT_Face face, const char (*script)[4], const cha
   }
 
   const GsubHeader *gsubHeader = (GsubHeader *)GSUB_table;
-  const ScriptList *scriptList = (ScriptList *)((uint8_t *)gsubHeader + gsubHeader->scriptListOffset);
+  const ScriptList *scriptList = (ScriptList *)((uint8_t *)gsubHeader + parse_16(gsubHeader->scriptListOffset));
   const ScriptTable *scriptTable = get_script_table(scriptList, script);
   if (scriptTable == NULL) {
     goto end;
@@ -484,9 +541,9 @@ bool get_required_feature(const FT_Face face, const char (*script)[4], const cha
   }
 
   // 0xFFFF means no required feature.
-  if (langSysTable->requiredFeatureIndex != 0xFFFF) {
-    const FeatureList *featureList = (FeatureList *)((uint8_t *)gsubHeader + gsubHeader->featureListOffset);
-    const FeatureTable *featureTable = get_feature(featureList, langSysTable->requiredFeatureIndex, required_feature);
+  if (parse_16(langSysTable->requiredFeatureIndex) != 0xFFFF) {
+    const FeatureList *featureList = (FeatureList *)((uint8_t *)gsubHeader + parse_16(gsubHeader->featureListOffset));
+    const FeatureTable *featureTable = get_feature(featureList, parse_16(langSysTable->requiredFeatureIndex), required_feature);
     if (featureTable != NULL) {
       result = true;
     }
@@ -499,11 +556,12 @@ end:
 
 
 static bool find_in_coverage(const CoverageTable *coverageTable, uint16_t id, uint32_t *index) {
-  switch (coverageTable->coverageFormat) {
+  switch (parse_16(coverageTable->coverageFormat)) {
     case 1: { // Individual glyph indices
       const CoverageArrayTable *arrayTable = (CoverageArrayTable *)coverageTable;
-      for (uint16_t i = 0; i < arrayTable->glyphCount; i++) {
-        if (id == arrayTable->glyphArray[i]) {
+      for (uint16_t i = 0; i < parse_16(arrayTable->glyphCount); i++) {
+        uint16_t coverageID = parse_16(arrayTable->glyphArray[i]);
+        if (id == coverageID) {
           if (index != NULL) {
             *index = i;
           }
@@ -511,7 +569,7 @@ static bool find_in_coverage(const CoverageTable *coverageTable, uint16_t id, ui
         }
         // The glyphArray contains glyphIDs in numerical order,
         // and we passed out ID.
-        if (id < arrayTable->glyphArray[i]) {
+        if (id < coverageID) {
           break;
         }
       }
@@ -519,20 +577,23 @@ static bool find_in_coverage(const CoverageTable *coverageTable, uint16_t id, ui
     }
     case 2: { // Range of glyphs
       const CoverageRangesTable *rangesTable = (CoverageRangesTable *)coverageTable;
-      if (rangesTable->rangeCount == 0) return false;
+      uint16_t rangeCount = parse_16(rangesTable->rangeCount);
+      if (rangeCount == 0) return false;
       const CoverageRangeRecordTable *first_range = &(rangesTable->rangeRecords[0]);
-      if (first_range->startGlyphID > id) return false;
-      const CoverageRangeRecordTable *last_range = &(rangesTable->rangeRecords[rangesTable->rangeCount - 1]);
-      if (last_range->endGlyphID < id) return false;
+      if (parse_16(first_range->startGlyphID) > id) return false;
+      const CoverageRangeRecordTable *last_range = &(rangesTable->rangeRecords[rangeCount - 1]);
+      if (parse_16(last_range->endGlyphID) < id) return false;
       uint16_t k = 0;
-      for (uint16_t i = 0; i < rangesTable->rangeCount; i++) {
+      for (uint16_t i = 0; i < rangeCount; i++) {
         const CoverageRangeRecordTable *range = &rangesTable->rangeRecords[i];
-        if (id < range->startGlyphID) break;
-        if (id > range->endGlyphID) {
-          k += range->endGlyphID - range->startGlyphID + 1;
+        uint16_t startGlyphID = parse_16(range->startGlyphID);
+        if (id < startGlyphID) break;
+        uint16_t endGlyphID = parse_16(range->endGlyphID);
+        if (id > endGlyphID) {
+          k += endGlyphID - startGlyphID + 1;
           continue;
         }
-        for (uint16_t j = range->startGlyphID; j <= id; j++) {
+        for (uint16_t j = startGlyphID; j <= id; j++) {
           if (id == j) {
             if (index != NULL) {
               *index = k;
@@ -553,35 +614,39 @@ static bool find_in_coverage(const CoverageTable *coverageTable, uint16_t id, ui
 
 
 static bool find_in_class_array(const ClassDefGeneric *classDefTable, uint16_t id, uint16_t *class) {
-  switch (classDefTable->classFormat) {
+  switch (parse_16(classDefTable->classFormat)) {
     case ClassFormat_1: { // Individual glyph indices
       ClassDefFormat1 *arrayTable = (ClassDefFormat1 *)classDefTable;
-      if (id < arrayTable->startGlyphID || id >= arrayTable->startGlyphID + arrayTable->glyphCount) {
+      uint16_t startGlyphID = parse_16(arrayTable->startGlyphID);
+      uint16_t glyphCount = parse_16(arrayTable->glyphCount);
+      if (id < startGlyphID || id >= startGlyphID + glyphCount) {
         break;
       }
       if (class != NULL) {
-        *class = arrayTable->classValueArray[id - arrayTable->startGlyphID];
+        *class = parse_16(arrayTable->classValueArray[id - startGlyphID]);
       }
       return true;
     }
     case ClassFormat_2: { // Range of glyphs
       ClassDefFormat2 *rangesTable = (ClassDefFormat2 *)classDefTable;
-      if (rangesTable->classRangeCount == 0) break;
+      uint16_t classRangeCount = parse_16(rangesTable->classRangeCount);
+      if (classRangeCount == 0) break;
       const ClassRangeRecord *first_range = &(rangesTable->classRangeRecords[0]);
-      if (first_range->startGlyphID > id) break;
-      const ClassRangeRecord *last_range = &(rangesTable->classRangeRecords[rangesTable->classRangeCount - 1]);
-      if (last_range->endGlyphID < id) break;
+      if (parse_16(first_range->startGlyphID) > id) break;
+      const ClassRangeRecord *last_range = &(rangesTable->classRangeRecords[classRangeCount - 1]);
+      if (parse_16(last_range->endGlyphID) < id) break;
 
-      for (uint16_t i = 0; i < rangesTable->classRangeCount; i++) {
+      for (uint16_t i = 0; i < classRangeCount; i++) {
         const ClassRangeRecord *range = &rangesTable->classRangeRecords[i];
-        if (id < range->startGlyphID) break;
-        if (id > range->endGlyphID) {
+        uint16_t startGlyphID = parse_16(range->startGlyphID);
+        if (id < startGlyphID) break;
+        if (id > parse_16(range->endGlyphID)) {
           continue;
         }
-        for (uint16_t j = range->startGlyphID; j <= id; j++) {
+        for (uint16_t j = startGlyphID; j <= id; j++) {
           if (id == j) {
             if (class != NULL) {
-              *class = range->_class;
+              *class = parse_16(range->_class);
             }
             return true;
           }
@@ -1050,10 +1115,10 @@ static bool apply_lookup_subtable(const LookupList *lookupList, GlyphArray* glyp
 
 static void apply_Lookup_index(const LookupList *lookupList, const LookupTable *lookupTable, GlyphArray* glyph_array, size_t *index) {
   // Stop at the first substitution that's successfully applied.
-  for (uint16_t i = 0; i < lookupTable->subTableCount; i++) {
+  for (uint16_t i = 0; i < parse_16(lookupTable->subTableCount); i++) {
     // TODO: we might want to check lookupTable->lookupFlag
-    GenericSubstTable *genericSubstTable = (GenericSubstTable *)((uint8_t *)lookupTable + lookupTable->subtableOffsets[i]);
-    if (apply_lookup_subtable(lookupList, glyph_array, genericSubstTable, lookupTable->lookupType, index)) {
+    GenericSubstTable *genericSubstTable = (GenericSubstTable *)((uint8_t *)lookupTable + parse_16(lookupTable->subtableOffsets[i]));
+    if (apply_lookup_subtable(lookupList, glyph_array, genericSubstTable, parse_16(lookupTable->lookupType), index)) {
       break;
     }
   }
@@ -1071,7 +1136,7 @@ static void apply_Lookup(const LookupList *lookupList, const LookupTable *lookup
 GlyphArray *apply_chain(const Chain *chain, const GlyphArray* glyph_array) {
   GlyphArray *ga = GlyphArray_new_from_GlyphArray(glyph_array);
   const GsubHeader *gsubHeader = (GsubHeader *)chain->GSUB_table;
-  const LookupList *lookupList = (LookupList *)((uint8_t *)gsubHeader + gsubHeader->lookupListOffset); // Needed for Chained Sequence Context Format
+  const LookupList *lookupList = (LookupList *)((uint8_t *)gsubHeader + parse_16(gsubHeader->lookupListOffset)); // Needed for Chained Sequence Context Format
   for (size_t i = 0; i < chain->lookupCount; i++) {
     // printf("Applying lookup %ld\n", i);
     apply_Lookup(lookupList, chain->lookupsArray[i], ga);

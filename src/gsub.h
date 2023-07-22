@@ -13,8 +13,9 @@
 #else
   #define packed_BE __attribute__((__packed__, scalar_storage_order("big-endian")))
 #endif
+#define packed __attribute__((__packed__))
 
-typedef struct packed_BE {
+typedef struct packed {
   uint16_t majorVersion;
   uint16_t minorVersion;
   uint16_t scriptListOffset;
@@ -23,28 +24,28 @@ typedef struct packed_BE {
 } GsubHeader;
 
 /** Script **/
-typedef struct packed_BE {
+typedef struct packed {
   uint8_t scriptTag[4];
   uint16_t scriptOffset;
 } ScriptRecord;
 
-typedef struct packed_BE  {
+typedef struct packed  {
   uint16_t scriptCount;
   ScriptRecord scriptRecords[];
 } ScriptList;
 
-typedef struct packed_BE {
+typedef struct packed {
   uint8_t langSysTag[4];
   uint16_t langSysOffset;
 } LangSysRecord;
 
-typedef struct packed_BE {
+typedef struct packed {
   uint16_t defaultLangSysOffset; // 0 means no default
   uint16_t langSysCount;
   LangSysRecord langSysRecords[];
 } ScriptTable;
 
-typedef struct packed_BE {
+typedef struct packed {
   uint16_t lookupOrderOffset; // NULL - reeserved
   uint16_t requiredFeatureIndex; // 0xFFFF for no required features
   uint16_t featureIndexCount;
@@ -62,18 +63,18 @@ typedef struct packed_BE {
   FeatureRecord featureRecords[];
 } FeatureList;
 
-typedef struct packed_BE {
+typedef struct packed {
   uint16_t featureParamsOffset; // used for 'cv01' – 'cv99', 'size', 'ss01' – 'ss20'
   uint16_t lookupIndexCount;
   uint16_t lookupListIndices[];
 } FeatureTable;
 
 /** Lookup **/
-typedef struct packed_BE {
+typedef struct packed {
   uint16_t lookupCount;
   uint16_t lookupOffsets[];
 } LookupList;
-typedef struct packed_BE {
+typedef struct packed {
   uint16_t lookupType;
   uint16_t lookupFlag;
   uint16_t subTableCount;
@@ -82,26 +83,26 @@ typedef struct packed_BE {
 } LookupTable;
 
 /** Coverage **/
-typedef struct packed_BE {
+typedef struct packed {
   uint16_t coverageFormat;
   uint16_t count;
   uint16_t array[];
 } CoverageTable;
 
 // The glyphArray contains glyphIDs in numerical order
-typedef struct packed_BE {
+typedef struct packed {
   uint16_t coverageFormat;
   uint16_t glyphCount;
   uint16_t glyphArray[];
 } CoverageArrayTable;
 
-typedef struct packed_BE {
+typedef struct packed {
   uint16_t startGlyphID;
   uint16_t endGlyphID;
   uint16_t startCoverageIndex;
 } CoverageRangeRecordTable;
 
-typedef struct packed_BE {
+typedef struct packed {
   uint16_t coverageFormat;
   uint16_t rangeCount;
   CoverageRangeRecordTable rangeRecords[];
@@ -109,24 +110,24 @@ typedef struct packed_BE {
 
 /** Class **/
 
-typedef struct packed_BE {
+typedef struct packed {
   uint16_t classFormat;
 } ClassDefGeneric;
 
-typedef struct packed_BE {
+typedef struct packed {
   uint16_t classFormat;
   uint16_t startGlyphID;
   uint16_t glyphCount;
   uint16_t classValueArray[];
 } ClassDefFormat1;
 
-typedef struct packed_BE {
+typedef struct packed {
   uint16_t startGlyphID;
   uint16_t endGlyphID;
   uint16_t _class;
 } ClassRangeRecord;
 
-typedef struct packed_BE {
+typedef struct packed {
   uint16_t classFormat;
   uint16_t classRangeCount;
   ClassRangeRecord classRangeRecords[];
@@ -134,7 +135,7 @@ typedef struct packed_BE {
 
 
 /** Generic Substitution Table **/
-typedef struct packed_BE {
+typedef struct packed {
   uint16_t substFormat;
 } GenericSubstTable;
 
