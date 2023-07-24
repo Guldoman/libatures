@@ -665,12 +665,12 @@ static bool find_in_class_array(const ClassDefGeneric *classDefTable, uint16_t i
 }
 
 static bool apply_SingleSubstitution(SingleSubstFormatGeneric *singleSubstFormatGeneric, GlyphArray* glyph_array, size_t index) {
-  CoverageTable *coverageTable = (CoverageTable *)((uint8_t *)singleSubstFormatGeneric + singleSubstFormatGeneric->coverageOffset);
-  switch (singleSubstFormatGeneric->substFormat) {
+  CoverageTable *coverageTable = (CoverageTable *)((uint8_t *)singleSubstFormatGeneric + parse_16(singleSubstFormatGeneric->coverageOffset));
+  switch (parse_16(singleSubstFormatGeneric->substFormat)) {
     case SingleSubstitutionFormat_1: {
       SingleSubstFormat1 *singleSubst = (SingleSubstFormat1 *)singleSubstFormatGeneric;
       if (find_in_coverage(coverageTable, glyph_array->array[index], NULL)) {
-        glyph_array->array[index] += singleSubst->deltaGlyphID;
+        glyph_array->array[index] += parse_16(singleSubst->deltaGlyphID);
         return true;
       }
       break;
@@ -679,40 +679,42 @@ static bool apply_SingleSubstitution(SingleSubstFormatGeneric *singleSubstFormat
       SingleSubstFormat2 *singleSubst = (SingleSubstFormat2 *)singleSubstFormatGeneric;
       uint32_t coverage_index;
       if (find_in_coverage(coverageTable, glyph_array->array[index], &coverage_index)) {
-        glyph_array->array[index] = singleSubst->substituteGlyphIDs[coverage_index];
+        glyph_array->array[index] = parse_16(singleSubst->substituteGlyphIDs[coverage_index]);
         return true;
       }
       break;
     }
     default:
-      fprintf(stderr, "UNKNOWN SubstFormat %d\n", singleSubstFormatGeneric->substFormat);
+      fprintf(stderr, "UNKNOWN SubstFormat %d\n", parse_16(singleSubstFormatGeneric->substFormat));
       break;
   }
   return false;
 }
 
 static bool apply_MultipleSubstitution(const MultipleSubstFormat1 *multipleSubstFormat, GlyphArray* glyph_array, size_t *index) {
-  CoverageTable *coverageTable = (CoverageTable *)((uint8_t *)multipleSubstFormat + multipleSubstFormat->coverageOffset);
+  CoverageTable *coverageTable = (CoverageTable *)((uint8_t *)multipleSubstFormat + parse_16(multipleSubstFormat->coverageOffset));
   uint32_t coverage_index;
   bool applicable = find_in_coverage(coverageTable, glyph_array->array[*index], &coverage_index);
-  if (!applicable || coverage_index >= multipleSubstFormat->sequenceCount) return false;
+  if (!applicable || coverage_index >= parse_16(multipleSubstFormat->sequenceCount)) return false;
 
-  SequenceTable *sequenceTable = (SequenceTable *)((uint8_t *)multipleSubstFormat + multipleSubstFormat->sequenceOffsets[coverage_index]);
-  GlyphArray_put(glyph_array, *index + sequenceTable->glyphCount - 1, glyph_array, *index, glyph_array->len - *index - 1);
-  for (uint16_t j = 0; j < sequenceTable->glyphCount; j++) {
-    glyph_array->array[*index + j] = sequenceTable->substituteGlyphIDs[j];
+  SequenceTable *sequenceTable = (SequenceTable *)((uint8_t *)multipleSubstFormat + parse_16(multipleSubstFormat->sequenceOffsets[coverage_index]));
+  uint16_t glyphCount = parse_16(sequenceTable->glyphCount);
+  GlyphArray_put(glyph_array, *index + glyphCount - 1, glyph_array, *index, glyph_array->len - *index - 1);
+  for (uint16_t j = 0; j < glyphCount; j++) {
+    glyph_array->array[*index + j] = parse_16(sequenceTable->substituteGlyphIDs[j]);
   }
-  *index += sequenceTable->glyphCount - 1; // ++ will be done by apply_Lookup
+  *index += glyphCount - 1; // ++ will be done by apply_Lookup
   return true;
 }
 
 static LigatureTable *find_Ligature(LigatureSetTable *ligatureSet, GlyphArray* glyph_array, size_t index) {
-  for (uint16_t i = 0; i < ligatureSet->ligatureCount; i++) {
-    LigatureTable *ligature = (LigatureTable *)((uint8_t *)ligatureSet + ligatureSet->ligatureOffsets[i]);
+  for (uint16_t i = 0; i < parse_16(ligatureSet->ligatureCount); i++) {
+    LigatureTable *ligature = (LigatureTable *)((uint8_t *)ligatureSet + parse_16(ligatureSet->ligatureOffsets[i]));
     bool fail = false;
-    if (index + ligature->componentCount - 1 > glyph_array->len) continue;
-    for (uint16_t j = 0; j < ligature->componentCount - 1; j++) {
-      if (ligature->componentGlyphIDs[j] != glyph_array->array[index+j]) {
+    uint16_t componentCount = parse_16(ligature->componentCount);
+    if (index + componentCount - 1 > glyph_array->len) continue;
+    for (uint16_t j = 0; j < componentCount - 1; j++) {
+      if (parse_16(ligature->componentGlyphIDs[j]) != glyph_array->array[index+j]) {
         fail = true;
         break;
       }
@@ -721,22 +723,21 @@ static LigatureTable *find_Ligature(LigatureSetTable *ligatureSet, GlyphArray* g
       return ligature;
     }
   }
-  return (LigatureTable *)NULL;
+  return NULL;
 }
 
 static bool apply_LigatureSubstitution(LigatureSubstitutionTable *ligatureSubstitutionTable, GlyphArray* glyph_array, size_t index) {
-  CoverageTable *coverageTable = (CoverageTable *)((uint8_t *)ligatureSubstitutionTable + ligatureSubstitutionTable->coverageOffset);
+  CoverageTable *coverageTable = (CoverageTable *)((uint8_t *)ligatureSubstitutionTable + parse_16(ligatureSubstitutionTable->coverageOffset));
   uint32_t coverage_index;
   bool applicable = find_in_coverage(coverageTable, glyph_array->array[index], &coverage_index);
-  if (!applicable || coverage_index >= ligatureSubstitutionTable->ligatureSetCount) return false;
-  LigatureSetTable *ligatureSet = (LigatureSetTable *)((uint8_t *)ligatureSubstitutionTable + ligatureSubstitutionTable->ligatureSetOffsets[coverage_index]);
-  // printf("Checking %d\n", glyph_array->array[index]);
+  if (!applicable || coverage_index >= parse_16(ligatureSubstitutionTable->ligatureSetCount)) return false;
+  LigatureSetTable *ligatureSet = (LigatureSetTable *)((uint8_t *)ligatureSubstitutionTable + parse_16(ligatureSubstitutionTable->ligatureSetOffsets[coverage_index]));
   LigatureTable *ligature = find_Ligature(ligatureSet, glyph_array, index + 1);
   if (ligature != NULL) {
-    // printf("FOUND ->%d\n", ligature->ligatureGlyph);
-    glyph_array->array[index] = ligature->ligatureGlyph;
-    GlyphArray_put(glyph_array, index + 1, glyph_array, index + ligature->componentCount, glyph_array->len - (index + ligature->componentCount));
-    GlyphArray_shrink(glyph_array, ligature->componentCount - 1);
+    glyph_array->array[index] = parse_16(ligature->ligatureGlyph);
+    uint16_t componentCount = parse_16(ligature->componentCount);
+    GlyphArray_put(glyph_array, index + 1, glyph_array, index + componentCount, glyph_array->len - (index + componentCount));
+    GlyphArray_shrink(glyph_array, componentCount - 1);
     return true;
   }
   return false;
@@ -1096,8 +1097,8 @@ static bool apply_lookup_subtable(const LookupList *lookupList, GlyphArray* glyp
     }
     case ExtensionSubstitutionLookupType: {
       ExtensionSubstitutionTable *extensionSubstitutionTable = (ExtensionSubstitutionTable *)genericSubstTable;
-      GenericSubstTable *_genericSubstTable = (GenericSubstTable *)((uint8_t *)extensionSubstitutionTable + extensionSubstitutionTable->extensionOffset);
-      applied = apply_lookup_subtable(lookupList, glyph_array, _genericSubstTable, extensionSubstitutionTable->extensionLookupType, index);
+      GenericSubstTable *_genericSubstTable = (GenericSubstTable *)((uint8_t *)extensionSubstitutionTable + parse_32(extensionSubstitutionTable->extensionOffset));
+      applied = apply_lookup_subtable(lookupList, glyph_array, _genericSubstTable, parse_16(extensionSubstitutionTable->extensionLookupType), index);
       break;
     }
     case ReverseChainingContextSingleLookupType: {

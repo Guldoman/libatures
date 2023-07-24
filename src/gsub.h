@@ -6,10 +6,9 @@
 #include <ft2build.h>
 #include FT_FREETYPE_H
 
-
 #ifdef __clang__
   #define packed_BE __attribute__((__packed__))
-  #warning "Wrong endianess"
+  #warning Wrong endianess
 #else
   #define packed_BE __attribute__((__packed__, scalar_storage_order("big-endian")))
 #endif
@@ -53,12 +52,12 @@ typedef struct packed {
 } LangSysTable;
 
 /** Feature **/
-typedef struct packed_BE {
+typedef struct packed {
   uint8_t featureTag[4];
   uint16_t featureOffset;
 } FeatureRecord;
 
-typedef struct packed_BE {
+typedef struct packed {
   uint16_t featureCount;
   FeatureRecord featureRecords[];
 } FeatureList;
@@ -141,18 +140,18 @@ typedef struct packed {
 
 
 /** Single Substitution Format - Type 1 **/
-typedef struct packed_BE {
+typedef struct packed {
   uint16_t substFormat;
   uint16_t coverageOffset;
 } SingleSubstFormatGeneric;
 
-typedef struct packed_BE {
+typedef struct packed {
   uint16_t substFormat;
   uint16_t coverageOffset;
   int16_t deltaGlyphID;
 } SingleSubstFormat1;
 
-typedef struct packed_BE {
+typedef struct packed {
   uint16_t substFormat;
   uint16_t coverageOffset;
   int16_t glyphCount;
@@ -161,33 +160,33 @@ typedef struct packed_BE {
 
 
 /** Multiple Substitution Format - Type 2 **/
-typedef struct packed_BE {
+typedef struct packed {
   uint16_t substFormat;
   uint16_t coverageOffset;
   uint16_t sequenceCount;
   uint16_t sequenceOffsets[];
 } MultipleSubstFormat1;
 
-typedef struct packed_BE {
+typedef struct packed {
   uint16_t glyphCount;
   uint16_t substituteGlyphIDs[];
 } SequenceTable;
 
 
 /** Ligature Substitution Format - Type 4 **/
-typedef struct packed_BE {
+typedef struct packed {
   uint16_t substFormat; // Set to 1 maybe?
   uint16_t coverageOffset;
   uint16_t ligatureSetCount;
   uint16_t ligatureSetOffsets[];
 } LigatureSubstitutionTable;
 
-typedef struct packed_BE {
+typedef struct packed {
   uint16_t ligatureCount;
   uint16_t ligatureOffsets[];
 } LigatureSetTable;
 
-typedef struct packed_BE {
+typedef struct packed {
   uint16_t ligatureGlyph;
   uint16_t componentCount;
   uint16_t componentGlyphIDs[];
@@ -395,7 +394,7 @@ typedef struct packed_BE {
 
 
 /** Extension Substitution Format - Type 7 **/
-typedef struct packed_BE {
+typedef struct packed {
   uint16_t substFormat;
   uint16_t extensionLookupType;
   uint32_t extensionOffset;
