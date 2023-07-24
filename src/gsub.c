@@ -559,7 +559,30 @@ static bool find_in_coverage(const CoverageTable *coverageTable, uint16_t id, ui
   switch (parse_16(coverageTable->coverageFormat)) {
     case 1: { // Individual glyph indices
       const CoverageArrayTable *arrayTable = (CoverageArrayTable *)coverageTable;
-      for (uint16_t i = 0; i < parse_16(arrayTable->glyphCount); i++) {
+      uint16_t glyphCount = parse_16(arrayTable->glyphCount);
+      if (glyphCount == 0) return false;
+      uint16_t first_ID = parse_16(arrayTable->glyphArray[0]);
+      if (first_ID > id) return false;
+      uint16_t last_ID = parse_16(arrayTable->glyphArray[glyphCount - 1]);
+      if (last_ID < id) return false;
+
+      // Binary search because we can
+      uint16_t top = glyphCount - 1;
+      uint16_t bottom = 0;
+      while (top - bottom > 1) {
+        uint16_t current = bottom + ((top - bottom) / 2);
+        uint16_t coverageID = parse_16(arrayTable->glyphArray[current]);
+        if (id < coverageID) {
+          top = current - 1;
+        } else if (id > coverageID) {
+          bottom = current + 1;
+        } else {
+          top = bottom = current;
+          break;
+        }
+      }
+
+      for (uint16_t i = bottom; i <= top; i++) {
         uint16_t coverageID = parse_16(arrayTable->glyphArray[i]);
         if (id == coverageID) {
           if (index != NULL) {
@@ -593,15 +616,10 @@ static bool find_in_coverage(const CoverageTable *coverageTable, uint16_t id, ui
           k += endGlyphID - startGlyphID + 1;
           continue;
         }
-        for (uint16_t j = startGlyphID; j <= id; j++) {
-          if (id == j) {
-            if (index != NULL) {
-              *index = k;
-            }
-            return true;
-          }
-          k++;
+        if (index != NULL) {
+          *index = k + (id - startGlyphID);
         }
+        return true;
       }
       break;
     }
@@ -636,21 +654,33 @@ static bool find_in_class_array(const ClassDefGeneric *classDefTable, uint16_t i
       const ClassRangeRecord *last_range = &(rangesTable->classRangeRecords[classRangeCount - 1]);
       if (parse_16(last_range->endGlyphID) < id) break;
 
-      for (uint16_t i = 0; i < classRangeCount; i++) {
+      // Binary search because we can
+      uint16_t top = classRangeCount - 1;
+      uint16_t bottom = 0;
+      while (top - bottom > 1) {
+        uint16_t current = bottom + ((top - bottom) / 2);
+        const ClassRangeRecord *range = &rangesTable->classRangeRecords[current];
+        if (id < parse_16(range->startGlyphID)) {
+          top = current - 1;
+        } else if (id > parse_16(range->endGlyphID)) {
+          bottom = current + 1;
+        } else {
+          top = bottom = current;
+          break;
+        }
+      }
+
+      for (uint16_t i = bottom; i <= top; i++) {
         const ClassRangeRecord *range = &rangesTable->classRangeRecords[i];
         uint16_t startGlyphID = parse_16(range->startGlyphID);
         if (id < startGlyphID) break;
         if (id > parse_16(range->endGlyphID)) {
           continue;
         }
-        for (uint16_t j = startGlyphID; j <= id; j++) {
-          if (id == j) {
-            if (class != NULL) {
-              *class = parse_16(range->_class);
-            }
-            return true;
-          }
+        if (class != NULL) {
+          *class = parse_16(range->_class);
         }
+        return true;
       }
       break;
     }
