@@ -6,12 +6,6 @@
 #include <ft2build.h>
 #include FT_FREETYPE_H
 
-#ifdef __clang__
-  #define packed_BE __attribute__((__packed__))
-  #warning Wrong endianess
-#else
-  #define packed_BE __attribute__((__packed__, scalar_storage_order("big-endian")))
-#endif
 #define packed __attribute__((__packed__))
 
 typedef struct packed {
@@ -252,23 +246,23 @@ typedef struct packed {
 
 
 /** Chained Sequence Context Format - Type 6 **/
-typedef struct packed_BE {
+typedef struct packed {
   uint16_t format;
 } GenericChainedSequenceContextFormat;
 
-typedef struct packed_BE {
+typedef struct packed {
   uint16_t format;
   uint16_t coverageOffset;
   uint16_t chainedSeqRuleSetCount;
   uint16_t chainedSeqRuleSetOffsets[];
 } ChainedSequenceContextFormat1;
 
-typedef struct packed_BE {
+typedef struct packed {
   uint16_t chainedSeqRuleCount;
   uint16_t chainedSeqRuleOffsets[];
 } ChainedSequenceRuleSet;
 
-typedef struct packed_BE {
+typedef struct packed {
   uint16_t backtrackGlyphCount;
   uint16_t backtrackSequence[];
   // uint16_t inputGlyphCount;
@@ -279,33 +273,33 @@ typedef struct packed_BE {
   // SequenceLookupRecord seqLookupRecords[];
 } ChainedSequenceRule;
 
-typedef struct packed_BE {
+typedef struct packed {
   uint16_t glyphCount;
   uint16_t sequence[];
 } ChainedSequenceRule_generic;
 
-typedef struct packed_BE {
+typedef struct packed {
   uint16_t backtrackGlyphCount;
   uint16_t backtrackSequence[];
 } ChainedSequenceRule_backtrack;
 
-typedef struct packed_BE {
+typedef struct packed {
   uint16_t inputGlyphCount;
   uint16_t inputSequence[];
 } ChainedSequenceRule_input;
 
-typedef struct packed_BE {
+typedef struct packed {
   uint16_t lookaheadGlyphCount;
   uint16_t lookaheadSequence[];
 } ChainedSequenceRule_lookahead;
 
-typedef struct packed_BE {
+typedef struct packed {
   uint16_t seqLookupCount;
   SequenceLookupRecord seqLookupRecords[];
 } ChainedSequenceRule_seq;
 
 
-typedef struct packed_BE {
+typedef struct packed {
   uint16_t format;
   uint16_t coverageOffset;
   uint16_t backtrackClassDefOffset;
@@ -315,12 +309,12 @@ typedef struct packed_BE {
   uint16_t chainedClassSeqRuleSetOffsets[];
 } ChainedSequenceContextFormat2;
 
-typedef struct packed_BE {
+typedef struct packed {
   uint16_t chainedClassSeqRuleCount;
   uint16_t chainedClassSeqRuleOffsets[];
 } ChainedClassSequenceRuleSet;
 
-typedef struct packed_BE {
+typedef struct packed {
   uint16_t backtrackGlyphCount;
   uint16_t backtrackSequence[];
   // uint16_t inputGlyphCount;
@@ -331,33 +325,33 @@ typedef struct packed_BE {
   // SequenceLookupRecord seqLookupRecord[];
 } ChainedClassSequenceRule;
 
-typedef struct packed_BE {
+typedef struct packed {
   uint16_t glyphCount;
   uint16_t sequence[];
 } ChainedClassSequenceRule_generic;
 
-typedef struct packed_BE {
+typedef struct packed {
   uint16_t backtrackGlyphCount;
   uint16_t backtrackSequence[];
 } ChainedClassSequenceRule_backtrack;
 
-typedef struct packed_BE {
+typedef struct packed {
   uint16_t inputGlyphCount;
   uint16_t inputSequence[];
 } ChainedClassSequenceRule_input;
 
-typedef struct packed_BE {
+typedef struct packed {
   uint16_t lookaheadGlyphCount;
   uint16_t lookaheadSequence[];
 } ChainedClassSequenceRule_lookahead;
 
-typedef struct packed_BE {
+typedef struct packed {
   uint16_t seqLookupCount;
   SequenceLookupRecord seqLookupRecords[];
 } ChainedClassSequenceRule_seq;
 
 
-typedef struct packed_BE {
+typedef struct packed {
   uint16_t format;
   uint16_t backtrackGlyphCount;
   uint16_t backtrackCoverageOffsets[];
@@ -369,25 +363,25 @@ typedef struct packed_BE {
   // SequenceLookupRecord seqLookupRecords[];
 } ChainedSequenceContextFormat3;
 
-typedef struct packed_BE {
+typedef struct packed {
   uint16_t glyphCount;
   uint16_t coverageOffsets[];
 } ChainedSequenceContextFormat3_generic;
 
-typedef struct packed_BE {
+typedef struct packed {
   uint16_t backtrackGlyphCount;
   uint16_t backtrackCoverageOffsets[];
 } ChainedSequenceContextFormat3_backtrack;
 
-typedef struct packed_BE {
+typedef struct packed {
   uint16_t inputGlyphCount;
   uint16_t inputCoverageOffsets[];
 } ChainedSequenceContextFormat3_input;
-typedef struct packed_BE {
+typedef struct packed {
   uint16_t lookaheadGlyphCount;
   uint16_t lookaheadCoverageOffsets[];
 } ChainedSequenceContextFormat3_lookahead;
-typedef struct packed_BE {
+typedef struct packed {
   uint16_t seqLookupCount;
   SequenceLookupRecord seqLookupRecords[];
 } ChainedSequenceContextFormat3_seq;
