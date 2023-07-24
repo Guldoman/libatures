@@ -3,7 +3,8 @@
 #include <stdbool.h>
 
 #include <ft2build.h>
-#include FT_OPENTYPE_VALIDATE_H
+#include FT_TRUETYPE_TAGS_H
+#include FT_TRUETYPE_TABLES_H
 #include FT_FREETYPE_H
 
 #include "gsub.h"
@@ -451,6 +452,28 @@ end:
   return c;
 }
 
+static FT_Error get_gsub(FT_Face face, uint8_t **table) {
+  FT_Error error;
+  FT_ULong table_len = 0;
+  *table = NULL;
+  error = FT_Load_Sfnt_Table(face, TTAG_GSUB, 0, NULL, &table_len);
+  if (error == FT_Err_Table_Missing) {
+    return FT_Err_Ok;
+  }
+  if (error) {
+    return error;
+  }
+
+  *table = (uint8_t *)malloc(table_len);
+  if (table == NULL) {
+    return FT_Err_Out_Of_Memory;
+  }
+
+  error = FT_Load_Sfnt_Table(face, TTAG_GSUB, 0, *table, &table_len);
+
+  return error;
+}
+
 // Generates a chain of Lookups to apply in order, given the script and language selected,
 // as well as the features enabled.
 // script and lang can be NULL to select the default ones.
@@ -459,13 +482,11 @@ end:
 // to specify where it belongs in the chain.
 // Use `get_required_feature` if the tag is needed to decide where to place it.
 Chain *generate_chain(FT_Face face, const char (*script)[4], const char (*lang)[4], const char (*features)[4], size_t n_features) {
-  FT_Bytes GSUB_table, ignore;
+  uint8_t *GSUB_table = NULL;
   LookupTable **lookupsArray = NULL;
-  // Need to pass the ignore table to make FreeType happy.
-  if (FT_OpenType_Validate(face, FT_VALIDATE_GSUB, &ignore, &ignore, &ignore, &GSUB_table, &ignore) != 0) {
+  if (get_gsub(face, &GSUB_table) != 0) {
     return NULL;
   }
-  FT_OpenType_Free(face, ignore);
 
   if (GSUB_table == NULL) {
     // There is no GSUB table.
@@ -499,21 +520,20 @@ Chain *generate_chain(FT_Face face, const char (*script)[4], const char (*lang)[
   Chain *chain = malloc(sizeof(Chain));
   if (chain == NULL)
     goto fail;
-  chain->face = face;
   chain->lookupsArray = lookupsArray;
   chain->lookupCount = lookupCount;
   chain->GSUB_table = GSUB_table;
   return chain;
 
 fail:
-  FT_OpenType_Free(face, GSUB_table);
+  free(GSUB_table);
   if (lookupsArray != NULL) free(lookupsArray);
   return NULL;
 }
 
 void destroy_chain(Chain *chain) {
   if (chain == NULL) return;
-  FT_OpenType_Free(chain->face, chain->GSUB_table);
+  free(chain->GSUB_table);
   free(chain->lookupsArray);
   free(chain);
 }
@@ -522,13 +542,11 @@ void destroy_chain(Chain *chain) {
 // `script` and `lang` can be NULL to select the default ones.
 // Writes in `required_feature` the tag.
 bool get_required_feature(const FT_Face face, const char (*script)[4], const char (*lang)[4], char (*required_feature)[4]) {
-  FT_Bytes GSUB_table, ignore;
+  uint8_t *GSUB_table = NULL;
   bool result = false;
-  // Need to pass the ignore table to make FreeType happy
-  if (FT_OpenType_Validate(face, FT_VALIDATE_GSUB, &ignore, &ignore, &ignore, &GSUB_table, &ignore) != 0) {
-    return false;
+  if (get_gsub(face, &GSUB_table) != 0) {
+    return NULL;
   }
-  FT_OpenType_Free(face, ignore);
 
   if (GSUB_table == NULL) {
     goto end;
@@ -555,7 +573,7 @@ bool get_required_feature(const FT_Face face, const char (*script)[4], const cha
   }
 
 end:
-  FT_OpenType_Free(face, GSUB_table);
+  free(GSUB_table);
   return result;
 }
 

@@ -427,10 +427,9 @@ typedef struct {
 
 
 typedef struct {
-  FT_Face face;
   LookupTable **lookupsArray;
   size_t lookupCount;
-  FT_Bytes GSUB_table;
+  uint8_t *GSUB_table;
 } Chain;
 
 typedef struct {
