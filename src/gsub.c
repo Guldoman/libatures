@@ -241,6 +241,11 @@ void test_GlyphArray(FT_Face face) {
 #define bswap_32(x) bswap32(x)
 #endif
 
+#elif defined(__MINGW32__)
+
+#define bswap_16(x) __builtin_bswap16(x)
+#define bswap_32(x) __builtin_bswap32(x)
+
 #else
 
 #include <byteswap.h>
