@@ -194,30 +194,30 @@ typedef struct packed {
 
 /** Sequence Context Format - Type 5 **/
 
-typedef struct packed_BE {
+typedef struct packed {
   uint16_t format;
 } GenericSequenceContextFormat;
 
-typedef struct packed_BE {
+typedef struct packed {
   uint16_t format;
   uint16_t coverageOffset;
   uint16_t seqRuleSetCount;
   uint16_t seqRuleSetOffsets[];
 } SequenceContextFormat1;
 
-typedef struct packed_BE {
+typedef struct packed {
   uint16_t seqRuleCount;
   uint16_t seqRuleOffsets[];
 } SequenceRuleSet;
 
-typedef struct packed_BE {
+typedef struct packed {
   uint16_t glyphCount;
   uint16_t seqLookupCount;
   uint16_t inputSequence[/* seqLookupCount - 1 */];
   //SequenceLookupRecord seqLookupRecords[/* seqLookupCount */];
 } SequenceRule;
 
-typedef struct packed_BE {
+typedef struct packed {
   uint16_t format;
   uint16_t coverageOffset;
   uint16_t classDefOffset;
@@ -225,19 +225,19 @@ typedef struct packed_BE {
   uint16_t classSeqRuleSetOffsets[];
 } SequenceContextFormat2;
 
-typedef struct packed_BE {
+typedef struct packed {
   uint16_t classSeqRuleCount;
   uint16_t classSeqRuleOffsets[];
 } ClassSequenceRuleSet;
 
-typedef struct packed_BE {
+typedef struct packed {
   uint16_t glyphCount;
   uint16_t seqLookupCount;
   uint16_t inputSequence[/* glyphCount - 1 */];
   // SequenceLookupRecord seqLookupRecords[/* seqLookupCount */];
 } ClassSequenceRule;
 
-typedef struct packed_BE {
+typedef struct packed {
   uint16_t format;
   uint16_t glyphCount;
   uint16_t seqLookupCount;
@@ -245,7 +245,7 @@ typedef struct packed_BE {
   //SequenceLookupRecord seqLookupRecords[];
 } SequenceContextFormat3;
 
-typedef struct packed_BE {
+typedef struct packed {
   uint16_t sequenceIndex;
   uint16_t lookupListIndex;
 } SequenceLookupRecord;
@@ -401,7 +401,7 @@ typedef struct packed {
 } ExtensionSubstitutionTable;
 
 /** Reverse Chaining Single Substitution Format - Type 8 **/
-typedef struct packed_BE {
+typedef struct packed {
   uint16_t substFormat;
   uint16_t coverageOffset;
   uint16_t backtrackGlyphCount;
@@ -412,17 +412,17 @@ typedef struct packed_BE {
   // uint16_t substituteGlyphIDs[];
 } ReverseChainSingleSubstFormat1;
 
-typedef struct packed_BE {
+typedef struct packed {
   uint16_t backtrackGlyphCount;
   uint16_t backtrackCoverageOffsets[];
 } ReverseChainSingleSubstFormat1_backtrack;
 
-typedef struct packed_BE {
+typedef struct packed {
   uint16_t lookaheadGlyphCount;
   uint16_t lookaheadCoverageOffsets[];
 } ReverseChainSingleSubstFormat1_lookahead;
 
-typedef struct packed_BE {
+typedef struct packed {
   uint16_t glyphCount;
   uint16_t substituteGlyphIDs[];
 } ReverseChainSingleSubstFormat1_sub;
