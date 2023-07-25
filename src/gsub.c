@@ -717,7 +717,7 @@ static bool find_in_class_array(const ClassDefGeneric *classDefTable, uint16_t i
   return false;
 }
 
-static bool apply_SingleSubstitution(SingleSubstFormatGeneric *singleSubstFormatGeneric, GlyphArray* glyph_array, size_t index) {
+static bool apply_SingleSubstitution(const SingleSubstFormatGeneric *singleSubstFormatGeneric, GlyphArray* glyph_array, size_t index) {
   CoverageTable *coverageTable = (CoverageTable *)((uint8_t *)singleSubstFormatGeneric + parse_16(singleSubstFormatGeneric->coverageOffset));
   switch (parse_16(singleSubstFormatGeneric->substFormat)) {
     case SingleSubstitutionFormat_1: {
@@ -760,7 +760,7 @@ static bool apply_MultipleSubstitution(const MultipleSubstFormat1 *multipleSubst
   return true;
 }
 
-static LigatureTable *find_Ligature(LigatureSetTable *ligatureSet, GlyphArray* glyph_array, size_t index) {
+static LigatureTable *find_Ligature(const LigatureSetTable *ligatureSet, GlyphArray* glyph_array, size_t index) {
   for (uint16_t i = 0; i < parse_16(ligatureSet->ligatureCount); i++) {
     LigatureTable *ligature = (LigatureTable *)((uint8_t *)ligatureSet + parse_16(ligatureSet->ligatureOffsets[i]));
     bool fail = false;
@@ -1177,11 +1177,11 @@ static bool apply_lookup_subtable(const LookupList *lookupList, GlyphArray* glyp
 }
 
 static void apply_Lookup_index(const LookupList *lookupList, const LookupTable *lookupTable, GlyphArray* glyph_array, size_t *index) {
+  uint16_t lookupType = parse_16(lookupTable->lookupType);
   // Stop at the first substitution that's successfully applied.
   for (uint16_t i = 0; i < parse_16(lookupTable->subTableCount); i++) {
-    // TODO: we might want to check lookupTable->lookupFlag
     GenericSubstTable *genericSubstTable = (GenericSubstTable *)((uint8_t *)lookupTable + parse_16(lookupTable->subtableOffsets[i]));
-    if (apply_lookup_subtable(lookupList, glyph_array, genericSubstTable, parse_16(lookupTable->lookupType), index)) {
+    if (apply_lookup_subtable(lookupList, glyph_array, genericSubstTable, lookupType, index)) {
       break;
     }
   }
