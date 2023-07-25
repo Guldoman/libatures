@@ -1166,7 +1166,7 @@ static bool apply_lookup_subtable(const LookupList *lookupList, GlyphArray* glyp
     case ReverseChainingContextSingleLookupType: {
       ReverseChainSingleSubstFormat1 *reverseChain = (ReverseChainSingleSubstFormat1 *)genericSubstTable;
       // Stop at the first one we apply
-      applied = apply_ReverseChainingContextSingleLookupType(reverseChain, glyph_array, (glyph_array->len - *index - 1));
+      applied = apply_ReverseChainingContextSingleLookupType(reverseChain, glyph_array, *index);
       break;
     }
     default:
@@ -1188,11 +1188,15 @@ static void apply_Lookup_index(const LookupList *lookupList, const LookupTable *
 }
 
 static void apply_Lookup(const LookupList *lookupList, const LookupTable *lookupTable, GlyphArray* glyph_array) {
-  size_t index = 0;
+  size_t index = 0, reverse_index = glyph_array->len - 1, *index_ptr = &index;
+  uint16_t lookupType = parse_16(lookupTable->lookupType);
+  if (lookupType == ReverseChainingContextSingleLookupType)
+    index_ptr = &reverse_index;
   // For each glyph
   while (index < glyph_array->len) {
-    apply_Lookup_index(lookupList, lookupTable, glyph_array, &index);
+    apply_Lookup_index(lookupList, lookupTable, glyph_array, index_ptr);
     index++;
+    reverse_index = glyph_array->len - index - 1;
   }
 }
 
