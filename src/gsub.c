@@ -891,10 +891,11 @@ static bool apply_SequenceSubstitution(const LookupList *lookupList, const Gener
         // ??
         break;
       }
-      const ClassSequenceRuleSet *ruleSet = (ClassSequenceRuleSet *)((uint8_t *)sequenceContext + parse_16(sequenceContext->classSeqRuleSetOffsets[starting_class]));
-      if (ruleSet == NULL) {
+      uint16_t starting_class_offset = parse_16(sequenceContext->classSeqRuleSetOffsets[starting_class]);
+      if (starting_class_offset == 0) {
         break;
       }
+      const ClassSequenceRuleSet *ruleSet = (ClassSequenceRuleSet *)((uint8_t *)sequenceContext + starting_class_offset);
 
       for (uint16_t i = 0; i < parse_16(ruleSet->classSeqRuleCount); i++) {
         const ClassSequenceRule *sequenceRule = (ClassSequenceRule *)((uint8_t *)ruleSet + parse_16(ruleSet->classSeqRuleOffsets[i]));
@@ -1000,10 +1001,11 @@ static bool apply_ChainedSequenceSubstitution(const LookupList *lookupList, cons
         // ??
         break;
       }
-      const ChainedClassSequenceRuleSet *chainedRuleSet = (ChainedClassSequenceRuleSet *)((uint8_t *)chainedSequenceContext + parse_16(chainedSequenceContext->chainedClassSeqRuleSetOffsets[starting_class]));
-      if (chainedRuleSet == NULL) {
+      uint16_t starting_class_offset = parse_16(chainedSequenceContext->chainedClassSeqRuleSetOffsets[starting_class]);
+      if (starting_class_offset == 0) {
         break;
       }
+      const ChainedClassSequenceRuleSet *chainedRuleSet = (ChainedClassSequenceRuleSet *)((uint8_t *)chainedSequenceContext + starting_class_offset);
 
       for (uint16_t i = 0; i < parse_16(chainedRuleSet->chainedClassSeqRuleCount); i++) {
         const ChainedClassSequenceRule *chainedClassSequenceRule = (ChainedClassSequenceRule *)((uint8_t *)chainedRuleSet + parse_16(chainedRuleSet->chainedClassSeqRuleOffsets[i]));
