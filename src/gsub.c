@@ -51,6 +51,7 @@ bool GlyphArray_set(GlyphArray *glyph_array, size_t from, const uint16_t *data, 
           (data + data_size > ga->array && data + data_size <= ga->array + ga->len)) {
         uint16_t *new_array = NULL;
         new_array = malloc(sizeof(uint16_t) * new_size);
+        if (new_array == NULL) return false;
         memcpy(new_array, ga->array, ga->len * sizeof(uint16_t));
         uint16_t *old_array = ga->array;
         ga->array = new_array;
@@ -407,7 +408,7 @@ static size_t get_lookups(const LangSysTable* langSysTable, const FeatureList *f
   if (lookups_map == NULL) return 0;
 
   size_t c = 0;
-  if (features_enabled == NULL) return 0;
+  if (features_enabled == NULL) goto end;
 
   for (size_t i = 0; i < nFeatures; i++) {
     if (parse_16(langSysTable->requiredFeatureIndex) != 0xFFFF && compare_tags(_RQD_tag, features_enabled[i])) {
@@ -456,6 +457,7 @@ static FT_Error get_gsub(FT_Face face, uint8_t **table) {
   FT_Error error;
   FT_ULong table_len = 0;
   *table = NULL;
+  // Get size only
   error = FT_Load_Sfnt_Table(face, TTAG_GSUB, 0, NULL, &table_len);
   if (error == FT_Err_Table_Missing) {
     return FT_Err_Ok;
