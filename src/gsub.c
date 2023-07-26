@@ -616,7 +616,7 @@ static bool find_in_coverage(const CoverageTable *coverageTable, uint16_t id, ui
           return true;
         }
         // The glyphArray contains glyphIDs in numerical order,
-        // and we passed out ID.
+        // and we passed our ID.
         if (id < coverageID) {
           break;
         }
@@ -927,8 +927,6 @@ static bool apply_SequenceSubstitution(const LookupList *lookupList, const Gener
         return false;
       }
 
-      GlyphArray *input_ga = GlyphArray_new(glyphCount);
-      GlyphArray_append(input_ga, &glyph_array->array[*index], glyphCount);
       const SequenceLookupRecord *seqLookupRecords = (SequenceLookupRecord *)((uint8_t *)sequenceContext + (2 + glyphCount + 1) * sizeof(uint16_t));
       apply_sequence_rule(lookupList, glyphCount, seqLookupRecords, parse_16(sequenceContext->seqLookupCount), glyph_array, index);
       return true;
