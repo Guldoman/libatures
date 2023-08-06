@@ -79,7 +79,7 @@ bool GlyphArray_set(GlyphArray *glyph_array, size_t from, const uint16_t *data, 
     }
     ga->len += remainder;
   }
-  memmove(&ga->array[from], data, data_size * sizeof(uint16_t));
+  memcpy(&ga->array[from], data, data_size * sizeof(uint16_t));
   return true;
 }
 
