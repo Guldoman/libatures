@@ -865,7 +865,7 @@ static bool apply_SequenceSubstitution(const LookupList *lookupList, const Gener
       CoverageTable *coverageTable = (CoverageTable *)((uint8_t *)sequenceContext + parse_16(sequenceContext->coverageOffset));
       uint32_t coverage_index;
       bool applicable = find_in_coverage(coverageTable, glyph_array->array[*index], &coverage_index);
-      if (!applicable) return false;
+      if (!applicable || coverage_index >= parse_16(sequenceContext->seqRuleSetCount)) return false;
 
       SequenceRuleSet *sequenceRuleSet = (SequenceRuleSet *)((uint8_t *)sequenceContext + parse_16(sequenceContext->seqRuleSetOffsets[coverage_index]));
 
