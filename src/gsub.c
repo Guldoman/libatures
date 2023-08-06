@@ -117,6 +117,11 @@ static GlyphArray * GlyphArray_new_from_GlyphArray(const GlyphArray *glyph_array
   return ga;
 }
 
+const uint16_t* GlyphArray_get(GlyphArray *glyph_array, size_t *length) {
+  if(length != NULL) *length = glyph_array->len;
+  return glyph_array->array;
+}
+
 static const char* utf8_to_codepoint(const char *p, unsigned *dst) {
   const unsigned char *up = (unsigned char*)p;
   unsigned res, n;

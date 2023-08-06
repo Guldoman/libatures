@@ -439,6 +439,7 @@ GlyphArray *apply_chain(const Chain *chain, const GlyphArray* glyph_array);
 GlyphArray *GlyphArray_new(size_t size);
 GlyphArray *GlyphArray_new_from_utf8(FT_Face face, const char *string, size_t len);
 GlyphArray *GlyphArray_new_from_data(uint16_t *data, size_t len);
+const uint16_t* GlyphArray_get(GlyphArray *glyph_array, size_t *length);
 bool GlyphArray_set1(GlyphArray *glyph_array, size_t index, uint16_t data);
 bool GlyphArray_set(GlyphArray *glyph_array, size_t from, const uint16_t *data, size_t data_size);
 bool GlyphArray_append(GlyphArray *glyph_array, const uint16_t *data, size_t data_size);
