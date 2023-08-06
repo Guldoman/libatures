@@ -9,6 +9,12 @@
 
 #include "gsub.h"
 
+typedef struct GlyphArray {
+  size_t len;
+  size_t allocated;
+  uint16_t *array;
+} GlyphArray;
+
 GlyphArray *GlyphArray_new(size_t size) {
   GlyphArray *ga = malloc(sizeof(GlyphArray));
   if (ga == NULL) return NULL;
@@ -96,7 +102,6 @@ bool GlyphArray_shrink(GlyphArray *glyph_array, size_t reduction) {
   ga->len -= reduction;
   return true;
 }
-
 
 bool GlyphArray_append(GlyphArray *glyph_array, const uint16_t *data, size_t data_size) {
   return GlyphArray_set(glyph_array, glyph_array->len, data, data_size);
@@ -271,6 +276,12 @@ void test_GlyphArray(FT_Face face) {
 #define parse_32(x) (x)
 #endif
 
+
+typedef struct Chain {
+  LookupTable **lookupsArray;
+  size_t lookupCount;
+  uint8_t *GSUB_table;
+} Chain;
 
 #define compare_tags(tag1, tag2) ((tag1)[0] == (tag2)[0] && (tag1)[1] == (tag2)[1] && (tag1)[2] == (tag2)[2] && (tag1)[3] == (tag2)[3])
 

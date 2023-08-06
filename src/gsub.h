@@ -426,17 +426,8 @@ typedef struct {
 /** Custom **/
 
 
-typedef struct {
-  LookupTable **lookupsArray;
-  size_t lookupCount;
-  uint8_t *GSUB_table;
-} Chain;
-
-typedef struct {
-  size_t len;
-  size_t allocated;
-  uint16_t *array;
-} GlyphArray;
+typedef struct Chain Chain;
+typedef struct GlyphArray GlyphArray;
 
 void parse_GSUB(FT_Face face, const char* path);
 
