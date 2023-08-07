@@ -337,7 +337,8 @@ enum {
 // Return the ScriptTable with the specified tag.
 // If the tag is NULL, the default script is returned.
 static const ScriptTable *get_script_table(const ScriptList *scriptList, const char (*script)[4]) {
-  for (uint16_t i = 0; i < parse_16(scriptList->scriptCount); i++) {
+  uint16_t scriptCount = parse_16(scriptList->scriptCount);
+  for (uint16_t i = 0; i < scriptCount; i++) {
     const ScriptRecord *scriptRecord = &scriptList->scriptRecords[i];
     const ScriptTable *scriptTable = (ScriptTable *)((uint8_t *)scriptList + parse_16(scriptRecord->scriptOffset));
     if (script == NULL) {
@@ -372,7 +373,8 @@ static const LangSysTable *get_lang_table(const ScriptTable *scriptTable, const 
     return result;
   }
 
-  for (uint16_t i = 0; i < parse_16(scriptTable->langSysCount); i++) {
+  uint16_t langSysCount = parse_16(scriptTable->langSysCount);
+  for (uint16_t i = 0; i < langSysCount; i++) {
     const LangSysRecord *langSysRecord = &scriptTable->langSysRecords[i];
     if (compare_tags(langSysRecord->langSysTag, *lang)) {
       return (LangSysTable *)((uint8_t *)scriptTable + parse_16(langSysRecord->langSysOffset));
@@ -409,7 +411,8 @@ static LookupTable *get_lookup(const LookupList *lookupList, uint16_t index) {
 // all the pointers to lookups, or be NULL.
 static size_t get_lookups_from_feature(const FeatureTable *featureTable, const LookupList *lookupList, bool *lookups_map) {
   size_t c = 0;
-  for (uint16_t k = 0; k < parse_16(featureTable->lookupIndexCount); k++) {
+  uint16_t lookupIndexCount = parse_16(featureTable->lookupIndexCount);
+  for (uint16_t k = 0; k < lookupIndexCount; k++) {
     uint16_t lookup_index = parse_16(featureTable->lookupListIndices[k]);
     LookupTable *lookup = get_lookup(lookupList, lookup_index);
     if (lookup == NULL) {
@@ -436,13 +439,15 @@ static size_t get_lookups(const LangSysTable* langSysTable, const FeatureList *f
   size_t c = 0;
   if (features_enabled == NULL) goto end;
 
+  uint16_t requiredFeatureIndex = parse_16(langSysTable->requiredFeatureIndex);
   for (size_t i = 0; i < nFeatures; i++) {
-    if (parse_16(langSysTable->requiredFeatureIndex) != 0xFFFF && compare_tags(_RQD_tag, features_enabled[i])) {
-      const FeatureTable *featureTable = get_feature(featureList, parse_16(langSysTable->requiredFeatureIndex), NULL);
+    if (requiredFeatureIndex != 0xFFFF && compare_tags(_RQD_tag, features_enabled[i])) {
+      const FeatureTable *featureTable = get_feature(featureList, requiredFeatureIndex, NULL);
       c += get_lookups_from_feature(featureTable, lookupList, lookups_map);
       continue;
     }
-    for (uint16_t j = 0; j < parse_16(langSysTable->featureIndexCount); j++) {
+    uint16_t featureIndexCount = parse_16(langSysTable->featureIndexCount);
+    for (uint16_t j = 0; j < featureIndexCount; j++) {
       char featureTag[4];
       uint16_t index = parse_16(langSysTable->featureIndices[j]);
       const FeatureTable *featureTable = get_feature(featureList, index, &featureTag);
@@ -465,7 +470,8 @@ static size_t get_lookups(const LangSysTable* langSysTable, const FeatureList *f
       *lookups = NULL;
       goto end;
     }
-    for (uint16_t i = 0, j = 0; i < parse_16(lookupList->lookupCount); i++) {
+    uint16_t lookupCount = parse_16(lookupList->lookupCount);
+    for (uint16_t i = 0, j = 0; i < lookupCount; i++) {
       if (lookups_map[i]) {
         _lookups[j] = get_lookup(lookupList, i);
         ///printf("%d -> %d\n", j, i);
@@ -682,7 +688,6 @@ static bool find_in_coverage(const CoverageTable *coverageTable, uint16_t id, ui
   return false;
 }
 
-
 static bool find_in_class_array(const ClassDefGeneric *classDefTable, uint16_t id, uint16_t *class) {
   switch (parse_16(classDefTable->classFormat)) {
     case ClassFormat_1: { // Individual glyph indices
@@ -790,7 +795,8 @@ static bool apply_MultipleSubstitution(const MultipleSubstFormat1 *multipleSubst
 }
 
 static LigatureTable *find_Ligature(const LigatureSetTable *ligatureSet, GlyphArray* glyph_array, size_t index) {
-  for (uint16_t i = 0; i < parse_16(ligatureSet->ligatureCount); i++) {
+  uint16_t ligatureCount = parse_16(ligatureSet->ligatureCount);
+  for (uint16_t i = 0; i < ligatureCount; i++) {
     LigatureTable *ligature = (LigatureTable *)((uint8_t *)ligatureSet + parse_16(ligatureSet->ligatureOffsets[i]));
     bool fail = false;
     uint16_t componentCount = parse_16(ligature->componentCount);
@@ -886,8 +892,8 @@ static bool apply_SequenceSubstitution(const Chain *chain, const GenericSequence
       if (!applicable || coverage_index >= parse_16(sequenceContext->seqRuleSetCount)) return false;
 
       SequenceRuleSet *sequenceRuleSet = (SequenceRuleSet *)((uint8_t *)sequenceContext + parse_16(sequenceContext->seqRuleSetOffsets[coverage_index]));
-
-      for (uint16_t i = 0; i < parse_16(sequenceRuleSet->seqRuleCount); i++) {
+      uint16_t seqRuleCount = parse_16(sequenceRuleSet->seqRuleCount);
+      for (uint16_t i = 0; i < seqRuleCount; i++) {
         const SequenceRule *sequenceRule = (SequenceRule *)((uint8_t *)sequenceRuleSet + parse_16(sequenceRuleSet->seqRuleOffsets[i]));
         uint16_t sequenceGlyphCount = parse_16(sequenceRule->glyphCount);
 
@@ -923,8 +929,8 @@ static bool apply_SequenceSubstitution(const Chain *chain, const GenericSequence
         break;
       }
       const ClassSequenceRuleSet *ruleSet = (ClassSequenceRuleSet *)((uint8_t *)sequenceContext + starting_class_offset);
-
-      for (uint16_t i = 0; i < parse_16(ruleSet->classSeqRuleCount); i++) {
+      uint16_t classSeqRuleCount = parse_16(ruleSet->classSeqRuleCount);
+      for (uint16_t i = 0; i < classSeqRuleCount; i++) {
         const ClassSequenceRule *sequenceRule = (ClassSequenceRule *)((uint8_t *)ruleSet + parse_16(ruleSet->classSeqRuleOffsets[i]));
         uint16_t sequenceGlyphCount = parse_16(sequenceRule->glyphCount);
 
@@ -975,8 +981,8 @@ static bool apply_ChainedSequenceSubstitution(const Chain *chain, const GenericC
       if (!applicable || coverage_index >= parse_16(chainedSequenceContext->chainedSeqRuleSetCount)) return false;
 
       ChainedSequenceRuleSet *chainedSequenceRuleSet = (ChainedSequenceRuleSet *)((uint8_t *)chainedSequenceContext + parse_16(chainedSequenceContext->chainedSeqRuleSetOffsets[coverage_index]));
-
-      for (uint16_t i = 0; i < parse_16(chainedSequenceRuleSet->chainedSeqRuleCount); i++) {
+      uint16_t chainedSeqRuleCount = parse_16(chainedSequenceRuleSet->chainedSeqRuleCount);
+      for (uint16_t i = 0; i < chainedSeqRuleCount; i++) {
         const ChainedSequenceRule *chainedSequenceRule = (ChainedSequenceRule *)((uint8_t *)chainedSequenceRuleSet + parse_16(chainedSequenceRuleSet->chainedSeqRuleOffsets[i]));
         const ChainedSequenceRule_backtrack *backtrackSequenceRule = (ChainedSequenceRule_backtrack *)chainedSequenceRule;
         uint16_t backtrackGlyphCount = parse_16(backtrackSequenceRule->backtrackGlyphCount);
@@ -1031,8 +1037,8 @@ static bool apply_ChainedSequenceSubstitution(const Chain *chain, const GenericC
         break;
       }
       const ChainedClassSequenceRuleSet *chainedRuleSet = (ChainedClassSequenceRuleSet *)((uint8_t *)chainedSequenceContext + starting_class_offset);
-
-      for (uint16_t i = 0; i < parse_16(chainedRuleSet->chainedClassSeqRuleCount); i++) {
+      uint16_t chainedClassSeqRuleCount = parse_16(chainedRuleSet->chainedClassSeqRuleCount);
+      for (uint16_t i = 0; i < chainedClassSeqRuleCount; i++) {
         const ChainedClassSequenceRule *chainedClassSequenceRule = (ChainedClassSequenceRule *)((uint8_t *)chainedRuleSet + parse_16(chainedRuleSet->chainedClassSeqRuleOffsets[i]));
         const ChainedClassSequenceRule_backtrack *backtrackSequenceRule = (ChainedClassSequenceRule_backtrack *)chainedClassSequenceRule;
         uint16_t backtrackGlyphCount = parse_16(backtrackSequenceRule->backtrackGlyphCount);
@@ -1149,19 +1155,15 @@ static bool apply_ReverseChainingContextSingleLookupType(const Chain *chain, con
 }
 
 static bool apply_lookup_subtable(const Chain *chain, GlyphArray* glyph_array, GenericSubstTable *genericSubstTable, uint16_t lookupType, size_t *index) {
-  bool applied = false;
   switch (lookupType) {
     case SingleLookupType: {
       SingleSubstFormatGeneric *singleSubstFormatGeneric = (SingleSubstFormatGeneric *)genericSubstTable;
-      // Stop at the first one we apply
-      applied = apply_SingleSubstitution(singleSubstFormatGeneric, glyph_array, *index);
-      break;
+      return apply_SingleSubstitution(singleSubstFormatGeneric, glyph_array, *index);
     }
     case MultipleLookupType: {
       MultipleSubstFormat1 *multipleSubstFormat = (MultipleSubstFormat1 *)genericSubstTable;
       // Stop at the first one we apply
-      applied = apply_MultipleSubstitution(multipleSubstFormat, glyph_array, index);
-      break;
+      return apply_MultipleSubstitution(multipleSubstFormat, glyph_array, index);
     }
     case AlternateLookupType: // TODO: just filter those out at chain creation time...
       // We don't really need to support it.
@@ -1169,46 +1171,41 @@ static bool apply_lookup_subtable(const Chain *chain, GlyphArray* glyph_array, G
       // which we don't... really care about.
       // Maybe we could think about enabling this for some weird features like 'rand'.
       fprintf(stderr, "AlternateLookupType unsupported\n");
-      break;
+      return false;
     case LigatureLookupType: {
       LigatureSubstitutionTable *ligatureSubstitutionTable = (LigatureSubstitutionTable *)genericSubstTable;
       // Stop at the first one we apply
-      applied = apply_LigatureSubstitution(ligatureSubstitutionTable, glyph_array, *index);
-      break;
+      return apply_LigatureSubstitution(ligatureSubstitutionTable, glyph_array, *index);
     }
     case ContextLookupType: {
       GenericSequenceContextFormat *genericSequence = (GenericSequenceContextFormat *)genericSubstTable;
-      applied = apply_SequenceSubstitution(chain, genericSequence, glyph_array, index);
-      break;
+      return apply_SequenceSubstitution(chain, genericSequence, glyph_array, index);
     }
     case ChainingLookupType: {
       GenericChainedSequenceContextFormat *genericChainedSequence = (GenericChainedSequenceContextFormat *)genericSubstTable;
-      applied = apply_ChainedSequenceSubstitution(chain, genericChainedSequence, glyph_array, index);
-      break;
+      return apply_ChainedSequenceSubstitution(chain, genericChainedSequence, glyph_array, index);
     }
     case ExtensionSubstitutionLookupType: {
       ExtensionSubstitutionTable *extensionSubstitutionTable = (ExtensionSubstitutionTable *)genericSubstTable;
       GenericSubstTable *_genericSubstTable = (GenericSubstTable *)((uint8_t *)extensionSubstitutionTable + parse_32(extensionSubstitutionTable->extensionOffset));
-      applied = apply_lookup_subtable(chain, glyph_array, _genericSubstTable, parse_16(extensionSubstitutionTable->extensionLookupType), index);
-      break;
+      return apply_lookup_subtable(chain, glyph_array, _genericSubstTable, parse_16(extensionSubstitutionTable->extensionLookupType), index);
     }
     case ReverseChainingContextSingleLookupType: {
       ReverseChainSingleSubstFormat1 *reverseChain = (ReverseChainSingleSubstFormat1 *)genericSubstTable;
       // Stop at the first one we apply
-      applied = apply_ReverseChainingContextSingleLookupType(chain, reverseChain, glyph_array, *index);
-      break;
+      return apply_ReverseChainingContextSingleLookupType(chain, reverseChain, glyph_array, *index);
     }
     default:
       fprintf(stderr, "UNKNOWN LookupType\n");
-      break;
+      return false;
   }
-  return applied;
 }
 
 static void apply_Lookup_index(const Chain *chain, const LookupTable *lookupTable, GlyphArray* glyph_array, size_t *index) {
   uint16_t lookupType = parse_16(lookupTable->lookupType);
   // Stop at the first substitution that's successfully applied.
-  for (uint16_t i = 0; i < parse_16(lookupTable->subTableCount); i++) {
+  uint16_t subTableCount = parse_16(lookupTable->subTableCount);
+  for (uint16_t i = 0; i < subTableCount; i++) {
     GenericSubstTable *genericSubstTable = (GenericSubstTable *)((uint8_t *)lookupTable + parse_16(lookupTable->subtableOffsets[i]));
     if (apply_lookup_subtable(chain, glyph_array, genericSubstTable, lookupType, index)) {
       break;
