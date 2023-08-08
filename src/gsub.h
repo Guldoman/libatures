@@ -431,8 +431,8 @@ typedef struct GlyphArray GlyphArray;
 
 void parse_GSUB(FT_Face face, const char* path);
 
-bool get_required_feature(const FT_Face face, const char (*script)[4], const char (*lang)[4], char (*required_feature)[4]);
-Chain *generate_chain(FT_Face face, const char (*script)[4], const char (*lang)[4], const char (*features)[4], size_t n_features);
+bool get_required_feature(const FT_Face face, const unsigned char (*script)[4], const unsigned char (*lang)[4], unsigned char (*required_feature)[4]);
+Chain *generate_chain(FT_Face face, const unsigned char (*script)[4], const unsigned char (*lang)[4], const unsigned char (*features)[4], size_t n_features);
 void destroy_chain(Chain *chain);
 GlyphArray *apply_chain(const Chain *chain, const GlyphArray* glyph_array);
 
