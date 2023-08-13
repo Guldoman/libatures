@@ -628,31 +628,18 @@ static bool find_in_coverage(const CoverageTable *coverageTable, uint16_t id, ui
       // Binary search because we can
       uint16_t top = glyphCount - 1;
       uint16_t bottom = 0;
-      while (top - bottom > 1) {
-        uint16_t current = bottom + ((top - bottom) / 2);
+      while (top - bottom >= 0) {
+        uint16_t current = (top + bottom) / 2;
         uint16_t coverageID = parse_16(arrayTable->glyphArray[current]);
         if (id < coverageID) {
           top = current - 1;
         } else if (id > coverageID) {
           bottom = current + 1;
         } else {
-          top = bottom = current;
-          break;
-        }
-      }
-
-      for (uint16_t i = bottom; i <= top; i++) {
-        uint16_t coverageID = parse_16(arrayTable->glyphArray[i]);
-        if (id == coverageID) {
           if (index != NULL) {
-            *index = i;
+            *index = current;
           }
           return true;
-        }
-        // The glyphArray contains glyphIDs in numerical order,
-        // and we passed our ID.
-        if (id < coverageID) {
-          break;
         }
       }
       break;
@@ -715,30 +702,19 @@ static bool find_in_class_array(const ClassDefGeneric *classDefTable, uint16_t i
       // Binary search because we can
       uint16_t top = classRangeCount - 1;
       uint16_t bottom = 0;
-      while (top - bottom > 1) {
-        uint16_t current = bottom + ((top - bottom) / 2);
+      while (top - bottom >= 0) {
+        uint16_t current = (top + bottom) / 2;
         const ClassRangeRecord *range = &rangesTable->classRangeRecords[current];
         if (id < parse_16(range->startGlyphID)) {
           top = current - 1;
         } else if (id > parse_16(range->endGlyphID)) {
           bottom = current + 1;
         } else {
-          top = bottom = current;
-          break;
+          if (class != NULL) {
+            *class = parse_16(range->_class);
+          }
+          return true;
         }
-      }
-
-      for (uint16_t i = bottom; i <= top; i++) {
-        const ClassRangeRecord *range = &rangesTable->classRangeRecords[i];
-        uint16_t startGlyphID = parse_16(range->startGlyphID);
-        if (id < startGlyphID) break;
-        if (id > parse_16(range->endGlyphID)) {
-          continue;
-        }
-        if (class != NULL) {
-          *class = parse_16(range->_class);
-        }
-        return true;
       }
       break;
     }
