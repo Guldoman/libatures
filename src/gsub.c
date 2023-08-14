@@ -9,10 +9,83 @@
 
 #include "gsub.h"
 
+#if defined(_MSC_VER)
+#include <BaseTsd.h>
+typedef SSIZE_T ssize_t;
+#endif
+
+
+// Bloom digest implementation inspired from Harfbuzz's
+
+typedef uint64_t bloom_part;
+typedef struct Bloom {
+  bloom_part a, b, c;
+} Bloom;
+
+#define bloom_shift_a 9
+#define bloom_shift_b 0
+#define bloom_shift_c 4
+#define mask_bits (ssize_t)(sizeof(bloom_part) * 8)
+#define get_mask(x, shift) ((bloom_part) 1) << (((x) >> (shift)) & (mask_bits - 1))
+
+#define null_bloom ((Bloom){.a = 0, .b = 0, .c = 0})
+#define full_bloom ((Bloom){.a = (bloom_part)-1,                               \
+                            .b = (bloom_part)-1,                               \
+                            .c = (bloom_part)-1})
+
+#define is_full_bloom(x) ((x).a == full_bloom.a &&                             \
+                          (x).b == full_bloom.b &&                             \
+                          (x).c == full_bloom.c)
+
+#define get_glyphID_bloom(x) ((Bloom){.a = get_mask((x), (9)),                 \
+                                      .b = get_mask((x), (0)),                 \
+                                      .c = get_mask((x), (4))})
+
+static inline Bloom get_glyphID_range_bloom(uint16_t glyphID_a, uint16_t glyphID_b) {
+  Bloom new_bloom = full_bloom;
+  if ((glyphID_b >> bloom_shift_a) - (glyphID_a >> bloom_shift_a) < mask_bits - 1) {
+    bloom_part part_a = get_mask(glyphID_a, bloom_shift_a);
+    bloom_part part_b = get_mask(glyphID_b, bloom_shift_a);
+    new_bloom.a = part_b + (part_b - part_a) - (part_b < part_a);
+  }
+  if ((glyphID_b >> bloom_shift_b) - (glyphID_a >> bloom_shift_b) < mask_bits - 1) {
+    bloom_part part_a = get_mask(glyphID_a, bloom_shift_b);
+    bloom_part part_b = get_mask(glyphID_b, bloom_shift_b);
+    new_bloom.b = part_b + (part_b - part_a) - (part_b < part_a);
+  }
+  if ((glyphID_b >> bloom_shift_c) - (glyphID_a >> bloom_shift_c) < mask_bits - 1) {
+    bloom_part part_a = get_mask(glyphID_a, bloom_shift_c);
+    bloom_part part_b = get_mask(glyphID_b, bloom_shift_c);
+    new_bloom.c = part_b + (part_b - part_a) - (part_b < part_a);
+  }
+  return new_bloom;
+}
+
+#define add_glyphID_to_bloom(bloom, x) ((Bloom){.a = (bloom).a | get_glyphID_bloom(x).a,\
+                                                .b = (bloom).b | get_glyphID_bloom(x).b,\
+                                                .c = (bloom).c | get_glyphID_bloom(x).c})
+
+#define add_bloom_to_bloom(bloom_a, bloom_b) ((Bloom){.a = (bloom_a).a | (bloom_b).a,\
+                                                      .b = (bloom_a).b | (bloom_b).b,\
+                                                      .c = (bloom_a).c | (bloom_b).c})
+
+#define bloom_compare_bloom(bloom_a, bloom_b) ((bloom_a).a & (bloom_b).a &&    \
+                                               (bloom_a).b & (bloom_b).b &&    \
+                                               (bloom_a).c & (bloom_b).c)
+
+#define glyphID_bloom_compare_bloom(glyphID_bloom, bloom) (((glyphID_bloom).a & (bloom).a) == (glyphID_bloom).a &&\
+                                                           ((glyphID_bloom).b & (bloom).b) == (glyphID_bloom).b &&\
+                                                           ((glyphID_bloom).c & (bloom).c) == (glyphID_bloom).c)
+
+#define glyphID_compare_bloom(glyphID, bloom) (glyphID_bloom_compare_bloom(get_glyphID_bloom(glyphID), (bloom)))
+
+
 typedef struct GlyphArray {
   size_t len;
   size_t allocated;
   uint16_t *array;
+  Bloom bloom;
+  bool bloom_valid;
 } GlyphArray;
 
 GlyphArray *GlyphArray_new(size_t size) {
@@ -20,6 +93,8 @@ GlyphArray *GlyphArray_new(size_t size) {
   if (ga == NULL) return NULL;
   ga->len = 0;
   ga->allocated = size;
+  ga->bloom = null_bloom;
+  ga->bloom_valid = true;
   ga->array = malloc(sizeof(uint16_t) * size);
   if (ga->array == NULL) {
     free(ga);
@@ -41,6 +116,7 @@ bool GlyphArray_set1(GlyphArray *glyph_array, size_t index, uint16_t data) {
   if (index > ga->len) {
     return false;
   }
+  ga->bloom_valid = false;
   ga->array[index] = data;
   return true;
 }
@@ -51,6 +127,7 @@ bool GlyphArray_set(GlyphArray *glyph_array, size_t from, const uint16_t *data, 
     // TODO: error out maybe?
     return false;
   }
+  ga->bloom_valid = false;
   if (from + data_size > ga->len) {
     size_t remainder = (from + data_size) - ga->len;
     if (ga->len + remainder > ga->allocated) {
@@ -99,6 +176,7 @@ bool GlyphArray_shrink(GlyphArray *glyph_array, size_t reduction) {
   if (reduction > ga->len) {
     return false;
   }
+  ga->bloom_valid = false;
   ga->len -= reduction;
   return true;
 }
@@ -113,6 +191,10 @@ static GlyphArray * GlyphArray_new_from_GlyphArray(const GlyphArray *glyph_array
   if (!GlyphArray_append(ga, glyph_array->array, glyph_array->len)) {
     GlyphArray_free(ga);
     return NULL;
+  }
+  if (glyph_array->bloom_valid) {
+    ga->bloom = glyph_array->bloom;
+    ga->bloom_valid = true;
   }
   return ga;
 }
@@ -149,6 +231,7 @@ GlyphArray *GlyphArray_new_from_utf8(FT_Face face, const char *string, size_t le
     string = utf8_to_codepoint(string, &codepoint);
     ga->array[ga->len++] = FT_Get_Char_Index(face, codepoint);
   }
+  ga->bloom_valid = false;
   return ga;
 }
 
@@ -179,6 +262,18 @@ void GlyphArray_print2(FT_Face face, GlyphArray *ga) {
     printf("[%s] ", name);
   }
   printf("\n");
+}
+
+static Bloom GlyphArray_get_bloom(const GlyphArray *ga) {
+  if (ga->bloom_valid) return ga->bloom;
+  GlyphArray *_ga = (GlyphArray*)ga; // Discard const, because it's only fair
+  for (size_t i = 0; i < _ga->len; i++) {
+    _ga->bloom = add_glyphID_to_bloom(_ga->bloom, _ga->array[i]);
+    // If the bloom already covers everything, we can stop...
+    if (is_full_bloom(_ga->bloom)) break;
+  }
+  _ga->bloom_valid = true;
+  return _ga->bloom;
 }
 
 void test_GlyphArray(FT_Face face) {
@@ -222,7 +317,7 @@ void test_GlyphArray(FT_Face face) {
 /** +++++++++++++++++++++++ **/
 
 // https://github.com/google/cityhash/blob/f5dc54147fcce12cefd16548c8e760d68ac04226/src/city.cc#L50-L94
-#ifdef _MSC_VER
+#if defined(_MSC_VER)
 
 #include <stdlib.h>
 #define bswap_16(x) _byteswap_ushort(x)
@@ -282,14 +377,120 @@ void test_GlyphArray(FT_Face face) {
 #endif
 
 
+#define HASH_SIZE 3769
+#define HASH_RETRIES 10
+#define HASH(x) ((((x) >> 1)) % hash->size)
+
+
+#define build_hash_functions(type)                                             \
+typedef struct {                                                               \
+  const void *address;                                                         \
+  type value;                                                                  \
+} HashEntry_##type;                                                            \
+typedef struct {                                                               \
+  size_t size;                                                                 \
+  size_t occupied;                                                             \
+  HashEntry_##type *entries;                                                   \
+} HashTable_##type;                                                            \
+static HashTable_##type *new_##type##_hash(void) {                             \
+  HashTable_##type *hash = malloc(sizeof(HashTable_##type));                   \
+  if (hash == NULL) return NULL;                                               \
+  *hash = (HashTable_##type){                                                  \
+    .size = HASH_SIZE,                                                         \
+    .occupied = 0,                                                             \
+    .entries = calloc(HASH_SIZE, sizeof(HashEntry_##type)),                    \
+  };                                                                           \
+  if (hash->entries == NULL) {                                                 \
+    free(hash);                                                                \
+    return NULL;                                                               \
+  }                                                                            \
+  return hash;                                                                 \
+}                                                                              \
+static inline bool get_from_##type##_hash(HashTable_##type *hash, const void* address, type *value) { \
+  size_t index = HASH((uintptr_t)address);                                     \
+  HashEntry_##type *entries = hash->entries;                                   \
+  for (size_t retries = 0; entries[index].address != NULL; retries++) {        \
+    if (entries[index].address == address) {                                   \
+      *value = entries[index].value;                                           \
+      return true;                                                             \
+    }                                                                          \
+    if (retries >= HASH_RETRIES) return false;                                 \
+    index = (index + 1) % hash->size;                                          \
+  }                                                                            \
+  return false;                                                                \
+}                                                                              \
+static bool resize_##type##_hash(HashTable_##type *hash);                      \
+static void set_to_##type##_hash(HashTable_##type *hash, const void* address, type value) { \
+  size_t index = HASH((uintptr_t)address);                                     \
+  HashEntry_##type *entries = hash->entries;                                   \
+  size_t retries;                                                              \
+  for (retries = 0; entries[index].address != NULL; retries++){                \
+    if (retries >= HASH_RETRIES || hash->occupied > hash->size / 3) {          \
+      bool success = resize_##type##_hash(hash);                               \
+      if (success) {                                                           \
+        set_to_##type##_hash(hash, address, value);                            \
+        return;                                                                \
+      }                                                                        \
+    }                                                                          \
+    if (retries >= HASH_RETRIES) return;                                       \
+    index = (index + 1) % hash->size;                                          \
+  }                                                                            \
+  entries[index].address = address;                                            \
+  entries[index].value = value;                                                \
+  hash->occupied++;                                                            \
+  return;                                                                      \
+}                                                                              \
+static bool resize_##type##_hash(HashTable_##type *hash) {                     \
+  size_t sizes[] = {4969, 7699, 9769, 11969, 14207, 17669, 22699, 29669, 34693, 44201}; \
+  size_t new_size = 0;                                                         \
+  for (size_t i = 0; i < sizeof(sizes)/sizeof(size_t); i++) {                  \
+    if (sizes[i] > hash->size) {                                               \
+      new_size = sizes[i];                                                     \
+      break;                                                                   \
+    }                                                                          \
+  }                                                                            \
+  if (new_size == 0) return false;                                             \
+  HashEntry_##type *new_entries = calloc(new_size, sizeof(HashEntry_##type));  \
+  if (new_entries == NULL) return false;                                       \
+  HashEntry_##type *old_entries = hash->entries;                               \
+  size_t old_size = hash->size;                                                \
+  hash->size = new_size;                                                       \
+  hash->occupied = 0;                                                          \
+  hash->entries = new_entries;                                                 \
+  for (size_t i = 0; i < old_size; i++) {                                      \
+    HashEntry_##type entry = old_entries[i];                                   \
+    if (entry.address != NULL) {                                               \
+      set_to_##type##_hash(hash, entry.address, entry.value);                  \
+    }                                                                          \
+  }                                                                            \
+  free(old_entries);                                                           \
+  return true;                                                                 \
+}                                                                              \
+static void free_##type##_hash(HashTable_##type *hash) {                       \
+  if (hash == NULL) return;                                                    \
+  free(hash->entries);                                                         \
+  hash->entries = NULL;                                                        \
+  hash->size = 0;                                                              \
+  hash->occupied = 0;                                                          \
+  free(hash);                                                                  \
+}
+
+build_hash_functions(Bloom)
+build_hash_functions(uintptr_t)
+
 typedef struct Chain {
   const LookupTable * const *lookupsArray;
   size_t lookupCount;
   const GsubHeader *gsubHeader;
   const LookupList *lookupList;
+  HashTable_Bloom *bloom_hash;
+  HashTable_uintptr_t *ptr_hash;
 } Chain;
 
-#define compare_tags(tag1, tag2) ((tag1)[0] == (tag2)[0] && (tag1)[1] == (tag2)[1] && (tag1)[2] == (tag2)[2] && (tag1)[3] == (tag2)[3])
+#define compare_tags(tag1, tag2) ((tag1)[0] == (tag2)[0] &&                     \
+                                  (tag1)[1] == (tag2)[1] &&                     \
+                                  (tag1)[2] == (tag2)[2] &&                     \
+                                  (tag1)[3] == (tag2)[3])
 
 const unsigned char DFLT_tag[4] = {'D', 'F', 'L', 'T'};
 const unsigned char dflt_tag[4] = {'d', 'f', 'l', 't'};
@@ -551,7 +752,8 @@ Chain *generate_chain(FT_Face face, const unsigned char (*script)[4], const unsi
 
   size_t lookupCount = get_lookups(langSysTable, featureList, lookupList, features, n_features, &lookupsArray);
 
-  Chain *chain = malloc(sizeof(Chain));
+  Chain *chain = NULL;
+  chain = calloc(1, sizeof(Chain));
   if (chain == NULL)
     goto fail;
 
@@ -559,11 +761,22 @@ Chain *generate_chain(FT_Face face, const unsigned char (*script)[4], const unsi
   chain->lookupCount = lookupCount;
   chain->gsubHeader = gsubHeader;
   chain->lookupList = lookupList;
+  chain->bloom_hash = new_Bloom_hash();
+  if (chain->bloom_hash == NULL)
+    goto fail_chain;
+  chain->ptr_hash = new_uintptr_t_hash();
+  if (chain->ptr_hash == NULL)
+    goto fail_chain;
+
   return chain;
 
 fail:
   free(GSUB_table);
-  if (lookupsArray != NULL) free(lookupsArray);
+  free(lookupsArray);
+  return NULL;
+
+fail_chain:
+  destroy_chain(chain);
   return NULL;
 }
 
@@ -571,6 +784,16 @@ void destroy_chain(Chain *chain) {
   if (chain == NULL) return;
   free((void *)chain->gsubHeader);
   free((void *)chain->lookupsArray);
+  free_Bloom_hash(chain->bloom_hash);
+  // uintptr_t_hash has malloc'd stuff inside, so free that first
+  if (chain->ptr_hash != NULL) {
+    for (size_t i = 0; i < chain->ptr_hash->size; i++) {
+      if (chain->ptr_hash->entries[i].address != NULL) {
+        free((void *)chain->ptr_hash->entries[i].value);
+      }
+    }
+  }
+  free_uintptr_t_hash(chain->ptr_hash);
   free(chain);
 }
 
@@ -613,8 +836,56 @@ end:
   return result;
 }
 
+// Returns the bloom digest that matches with the glyphs for the Coverage.
+static Bloom get_Coverage_bloom(const CoverageTable *coverageTable) {
+  Bloom bloom = null_bloom;
+  switch (parse_16(coverageTable->coverageFormat)) {
+    case 1: { // Individual glyph indices
+      const CoverageArrayTable *arrayTable = (CoverageArrayTable *)coverageTable;
+      uint16_t glyphCount = parse_16(arrayTable->glyphCount);
+      if (glyphCount == 0) break;
 
-static bool find_in_coverage(const CoverageTable *coverageTable, uint16_t id, uint32_t *index) {
+      for (uint16_t i = 0; i < glyphCount; i++) {
+        uint16_t coverageID = parse_16(arrayTable->glyphArray[i]);
+        bloom = add_glyphID_to_bloom(bloom, coverageID);
+        if (is_full_bloom(bloom)) break;
+      }
+      break;
+    }
+    case 2: { // Range of glyphs
+      const CoverageRangesTable *rangesTable = (CoverageRangesTable *)coverageTable;
+      uint16_t rangeCount = parse_16(rangesTable->rangeCount);
+      if (rangeCount == 0) break;
+      for (uint16_t i = 0; i < rangeCount; i++) {
+        const CoverageRangeRecordTable *range = &rangesTable->rangeRecords[i];
+        uint16_t startGlyphID = parse_16(range->startGlyphID);
+        uint16_t endGlyphID = parse_16(range->endGlyphID);
+        Bloom range_bloom = get_glyphID_range_bloom(startGlyphID, endGlyphID);
+        bloom = add_bloom_to_bloom(bloom, range_bloom);
+        if (is_full_bloom(bloom)) break;
+      }
+      break;
+    }
+    default:
+      fprintf(stderr, "UNKNOWN coverage format\n");
+      return full_bloom;
+  }
+  return bloom;
+}
+
+// Returns the bloom digest that matches with the glyphs for all the Coverages.
+static inline Bloom get_Coverage_array_bloom(const uint8_t *coverageTablesBase, uint16_t *coverageTables, uint16_t coverageSize) {
+  Bloom bloom = null_bloom;
+  for (uint16_t i = 0; i < coverageSize; i++) {
+    const CoverageTable *coverageTable = (CoverageTable *)(coverageTablesBase + parse_16(coverageTables[i]));
+    Bloom coverage_bloom = get_Coverage_bloom((const void *)coverageTable);
+    bloom = add_bloom_to_bloom(bloom, coverage_bloom);
+    if (is_full_bloom(bloom)) break;
+  }
+  return bloom;
+}
+
+static bool find_in_Coverage(const CoverageTable *coverageTable, uint16_t id, uint32_t *index) {
   switch (parse_16(coverageTable->coverageFormat)) {
     case 1: { // Individual glyph indices
       const CoverageArrayTable *arrayTable = (CoverageArrayTable *)coverageTable;
@@ -733,7 +1004,7 @@ static bool apply_SingleSubstitution(const SingleSubstFormatGeneric *singleSubst
   switch (parse_16(singleSubstFormatGeneric->substFormat)) {
     case SingleSubstitutionFormat_1: {
       const SingleSubstFormat1 *singleSubst = (SingleSubstFormat1 *)singleSubstFormatGeneric;
-      if (find_in_coverage(coverageTable, glyph_array->array[index], NULL)) {
+      if (find_in_Coverage(coverageTable, glyph_array->array[index], NULL)) {
         GlyphArray_set1(glyph_array, index, glyph_array->array[index] + parse_16(singleSubst->deltaGlyphID));
         return true;
       }
@@ -742,7 +1013,7 @@ static bool apply_SingleSubstitution(const SingleSubstFormatGeneric *singleSubst
     case SingleSubstitutionFormat_2: {
       const SingleSubstFormat2 *singleSubst = (SingleSubstFormat2 *)singleSubstFormatGeneric;
       uint32_t coverage_index;
-      if (find_in_coverage(coverageTable, glyph_array->array[index], &coverage_index)) {
+      if (find_in_Coverage(coverageTable, glyph_array->array[index], &coverage_index)) {
         GlyphArray_set1(glyph_array, index, parse_16(singleSubst->substituteGlyphIDs[coverage_index]));
         return true;
       }
@@ -758,7 +1029,7 @@ static bool apply_SingleSubstitution(const SingleSubstFormatGeneric *singleSubst
 static bool apply_MultipleSubstitution(const MultipleSubstFormat1 *multipleSubstFormat, GlyphArray* glyph_array, size_t *index) {
   const CoverageTable *coverageTable = (CoverageTable *)((uint8_t *)multipleSubstFormat + parse_16(multipleSubstFormat->coverageOffset));
   uint32_t coverage_index;
-  bool applicable = find_in_coverage(coverageTable, glyph_array->array[*index], &coverage_index);
+  bool applicable = find_in_Coverage(coverageTable, glyph_array->array[*index], &coverage_index);
   if (!applicable || coverage_index >= parse_16(multipleSubstFormat->sequenceCount)) return false;
 
   const SequenceTable *sequenceTable = (SequenceTable *)((uint8_t *)multipleSubstFormat + parse_16(multipleSubstFormat->sequenceOffsets[coverage_index]));
@@ -794,7 +1065,7 @@ static const LigatureTable *find_Ligature(const LigatureSetTable *ligatureSet, G
 static bool apply_LigatureSubstitution(const LigatureSubstitutionTable *ligatureSubstitutionTable, GlyphArray* glyph_array, size_t index) {
   const CoverageTable *coverageTable = (CoverageTable *)((uint8_t *)ligatureSubstitutionTable + parse_16(ligatureSubstitutionTable->coverageOffset));
   uint32_t coverage_index;
-  bool applicable = find_in_coverage(coverageTable, glyph_array->array[index], &coverage_index);
+  bool applicable = find_in_Coverage(coverageTable, glyph_array->array[index], &coverage_index);
   if (!applicable || coverage_index >= parse_16(ligatureSubstitutionTable->ligatureSetCount)) return false;
   const LigatureSetTable *ligatureSet = (LigatureSetTable *)((uint8_t *)ligatureSubstitutionTable + parse_16(ligatureSubstitutionTable->ligatureSetOffsets[coverage_index]));
   const LigatureTable *ligature = find_Ligature(ligatureSet, glyph_array, index + 1);
@@ -823,7 +1094,7 @@ static bool check_with_Coverage(const GlyphArray *glyph_array, size_t index, con
 
   for (uint16_t i = 0; i < coverageSize; i++) {
     const CoverageTable *coverageTable = (CoverageTable *)(coverageTablesBase + parse_16(coverageTables[i]));
-    if (!find_in_coverage(coverageTable, glyph_array->array[index + (i * step)], NULL))
+    if (!find_in_Coverage(coverageTable, glyph_array->array[index + (i * step)], NULL))
       return false;
   }
   return true;
@@ -841,16 +1112,18 @@ static bool check_with_Class(const GlyphArray *glyph_array, size_t index, const 
   return true;
 }
 
-static void apply_Lookup_index(const Chain *chain, const LookupTable *lookupTable, GlyphArray* glyph_array, size_t *index);
+static void apply_Lookup_at_index(const Chain *chain, const LookupTable *lookupTable, const Bloom* blooms, GlyphArray* glyph_array, size_t *index);
 
-static void apply_sequence_rule(const Chain *chain, uint16_t glyphCount, const SequenceLookupRecord *seqLookupRecords, uint16_t seqLookupCount, GlyphArray *glyph_array, size_t *index) {
+static void apply_SequenceRule(const Chain *chain, uint16_t glyphCount, const SequenceLookupRecord *seqLookupRecords, uint16_t seqLookupCount, GlyphArray *glyph_array, size_t *index) {
   GlyphArray *input_ga = GlyphArray_new(glyphCount);
+  if (input_ga == NULL)
+    return; // TODO: panic? We could even just have one per chain and reuse it.
   GlyphArray_append(input_ga, &glyph_array->array[*index], glyphCount);
   for (uint16_t i = 0; i < seqLookupCount; i++) {
     const SequenceLookupRecord *sequenceLookupRecord = &seqLookupRecords[i];
     const LookupTable *lookupTable = get_lookup(chain->lookupList, parse_16(sequenceLookupRecord->lookupListIndex));
     size_t input_index = parse_16(sequenceLookupRecord->sequenceIndex);
-    apply_Lookup_index(chain, lookupTable, input_ga, &input_index);
+    apply_Lookup_at_index(chain, lookupTable, NULL, input_ga, &input_index);
   }
   GlyphArray_put(glyph_array, *index + input_ga->len, glyph_array, *index + glyphCount, glyph_array->len - (*index + glyphCount));
   GlyphArray_put(glyph_array, *index, input_ga, 0, input_ga->len);
@@ -861,13 +1134,39 @@ static void apply_sequence_rule(const Chain *chain, uint16_t glyphCount, const S
   GlyphArray_free(input_ga);
 }
 
+// Returns the bloom digest that matches with the glyphs that "start" a SequenceSubstitution.
+static Bloom get_SequenceSubstitution_bloom(const GenericSequenceContextFormat *genericSequence) {
+  switch (parse_16(genericSequence->format)) {
+    case SequenceContextFormat_1: {
+      const SequenceContextFormat1 *sequenceContext = (SequenceContextFormat1 *)genericSequence;
+      const CoverageTable *coverageTable = (CoverageTable *)((uint8_t *)sequenceContext + parse_16(sequenceContext->coverageOffset));
+      return get_Coverage_bloom(coverageTable);
+    }
+    case SequenceContextFormat_2: {
+      const SequenceContextFormat2 *sequenceContext = (SequenceContextFormat2 *)genericSequence;
+      const CoverageTable *coverageTable = (CoverageTable *)((uint8_t *)sequenceContext + parse_16(sequenceContext->coverageOffset));
+      // TODO: I'm not sure we can do much for ClassSequences
+      return get_Coverage_bloom(coverageTable);
+    }
+    case SequenceContextFormat_3: {
+      const SequenceContextFormat3 *sequenceContext = (SequenceContextFormat3 *)genericSequence;
+      uint16_t glyphCount = parse_16(sequenceContext->glyphCount);
+      if (glyphCount == 0) return full_bloom;
+      return get_Coverage_array_bloom((uint8_t *)genericSequence, (uint16_t *)((uint8_t *)sequenceContext + sizeof(uint16_t) * 3), glyphCount);
+    }
+    default:
+      fprintf(stderr, "UNKNOWN SequenceContextFormat %d\n", parse_16(genericSequence->format));
+      return full_bloom;
+  }
+}
+
 static bool apply_SequenceSubstitution(const Chain *chain, const GenericSequenceContextFormat *genericSequence, GlyphArray* glyph_array, size_t *index) {
   switch (parse_16(genericSequence->format)) {
     case SequenceContextFormat_1: {
       const SequenceContextFormat1 *sequenceContext = (SequenceContextFormat1 *)genericSequence;
       const CoverageTable *coverageTable = (CoverageTable *)((uint8_t *)sequenceContext + parse_16(sequenceContext->coverageOffset));
       uint32_t coverage_index;
-      bool applicable = find_in_coverage(coverageTable, glyph_array->array[*index], &coverage_index);
+      bool applicable = find_in_Coverage(coverageTable, glyph_array->array[*index], &coverage_index);
       if (!applicable || coverage_index >= parse_16(sequenceContext->seqRuleSetCount)) return false;
 
       const SequenceRuleSet *sequenceRuleSet = (SequenceRuleSet *)((uint8_t *)sequenceContext + parse_16(sequenceContext->seqRuleSetOffsets[coverage_index]));
@@ -884,7 +1183,7 @@ static bool apply_SequenceSubstitution(const Chain *chain, const GenericSequence
           continue;
         }
         const SequenceLookupRecord *seqLookupRecords = (SequenceLookupRecord *)((uint8_t *)sequenceRule + (1 + sequenceGlyphCount) * sizeof(uint16_t));
-        apply_sequence_rule(chain, sequenceGlyphCount, seqLookupRecords, parse_16(sequenceRule->seqLookupCount), glyph_array, index);
+        apply_SequenceRule(chain, sequenceGlyphCount, seqLookupRecords, parse_16(sequenceRule->seqLookupCount), glyph_array, index);
         return true;
       }
       break;
@@ -892,7 +1191,7 @@ static bool apply_SequenceSubstitution(const Chain *chain, const GenericSequence
     case SequenceContextFormat_2: {
       const SequenceContextFormat2 *sequenceContext = (SequenceContextFormat2 *)genericSequence;
       const CoverageTable *coverageTable = (CoverageTable *)((uint8_t *)sequenceContext + parse_16(sequenceContext->coverageOffset));
-      if (!find_in_coverage(coverageTable, glyph_array->array[*index], NULL))
+      if (!find_in_Coverage(coverageTable, glyph_array->array[*index], NULL))
         return false;
 
       const ClassDefGeneric *inputClassDef = (ClassDefGeneric *)((uint8_t *)sequenceContext + parse_16(sequenceContext->classDefOffset));
@@ -922,7 +1221,7 @@ static bool apply_SequenceSubstitution(const Chain *chain, const GenericSequence
         }
 
         const SequenceLookupRecord *seqLookupRecords = (SequenceLookupRecord *)((uint8_t *)sequenceRule + (1 + sequenceGlyphCount) * sizeof(uint16_t));
-        apply_sequence_rule(chain, sequenceGlyphCount, seqLookupRecords, parse_16(sequenceRule->seqLookupCount), glyph_array, index);
+        apply_SequenceRule(chain, sequenceGlyphCount, seqLookupRecords, parse_16(sequenceRule->seqLookupCount), glyph_array, index);
         // Only use the first one that matches.
         return true;
       }
@@ -940,7 +1239,7 @@ static bool apply_SequenceSubstitution(const Chain *chain, const GenericSequence
       }
 
       const SequenceLookupRecord *seqLookupRecords = (SequenceLookupRecord *)((uint8_t *)sequenceContext + (2 + glyphCount + 1) * sizeof(uint16_t));
-      apply_sequence_rule(chain, glyphCount, seqLookupRecords, parse_16(sequenceContext->seqLookupCount), glyph_array, index);
+      apply_SequenceRule(chain, glyphCount, seqLookupRecords, parse_16(sequenceContext->seqLookupCount), glyph_array, index);
       return true;
     }
     default:
@@ -950,13 +1249,43 @@ static bool apply_SequenceSubstitution(const Chain *chain, const GenericSequence
   return false;
 }
 
+// Returns the bloom digest that matches with the glyphs that "start" a ChainedSequenceSubstitution.
+static Bloom get_ChainedSequenceSubstitution_bloom(const GenericChainedSequenceContextFormat *genericChainedSequence) {
+  switch (parse_16(genericChainedSequence->format)) {
+    case ChainedSequenceContextFormat_1: {
+      const ChainedSequenceContextFormat1 *chainedSequenceContext = (ChainedSequenceContextFormat1 *)genericChainedSequence;
+      const CoverageTable *coverageTable = (CoverageTable *)((uint8_t *)chainedSequenceContext + parse_16(chainedSequenceContext->coverageOffset));
+      return get_Coverage_bloom(coverageTable);
+    }
+    case ChainedSequenceContextFormat_2: {
+      const ChainedSequenceContextFormat2 *chainedSequenceContext = (ChainedSequenceContextFormat2 *)genericChainedSequence;
+      const CoverageTable *coverageTable = (CoverageTable *)((uint8_t *)chainedSequenceContext + parse_16(chainedSequenceContext->coverageOffset));
+      // TODO: I'm not sure we can do much for ClassSequences
+      return get_Coverage_bloom(coverageTable);
+    }
+    case ChainedSequenceContextFormat_3: {
+      const ChainedSequenceContextFormat3_backtrack *backtrackCoverage = (ChainedSequenceContextFormat3_backtrack *)((uint8_t *)genericChainedSequence + sizeof(uint16_t));
+      uint16_t backtrackGlyphCount = parse_16(backtrackCoverage->backtrackGlyphCount);
+      const ChainedSequenceContextFormat3_input *inputCoverage = (ChainedSequenceContextFormat3_input *)((uint8_t *)backtrackCoverage + sizeof(uint16_t) * (backtrackGlyphCount + 1));
+      uint16_t inputGlyphCount = parse_16(inputCoverage->inputGlyphCount);
+
+      if (inputGlyphCount == 0) return full_bloom;
+
+      return get_Coverage_array_bloom((uint8_t *)genericChainedSequence, (uint16_t *)((uint8_t *)inputCoverage + sizeof(uint16_t) * 1), inputGlyphCount);
+    }
+    default:
+      fprintf(stderr, "UNKNOWN ChainedSequenceContextFormat %d\n", parse_16(genericChainedSequence->format));
+      return full_bloom;
+  }
+}
+
 static bool apply_ChainedSequenceSubstitution(const Chain *chain, const GenericChainedSequenceContextFormat *genericChainedSequence, GlyphArray* glyph_array, size_t *index) {
   switch (parse_16(genericChainedSequence->format)) {
     case ChainedSequenceContextFormat_1: {
       const ChainedSequenceContextFormat1 *chainedSequenceContext = (ChainedSequenceContextFormat1 *)genericChainedSequence;
       const CoverageTable *coverageTable = (CoverageTable *)((uint8_t *)chainedSequenceContext + parse_16(chainedSequenceContext->coverageOffset));
       uint32_t coverage_index;
-      bool applicable = find_in_coverage(coverageTable, glyph_array->array[*index], &coverage_index);
+      bool applicable = find_in_Coverage(coverageTable, glyph_array->array[*index], &coverage_index);
       if (!applicable || coverage_index >= parse_16(chainedSequenceContext->chainedSeqRuleSetCount)) return false;
 
       const ChainedSequenceRuleSet *chainedSequenceRuleSet = (ChainedSequenceRuleSet *)((uint8_t *)chainedSequenceContext + parse_16(chainedSequenceContext->chainedSeqRuleSetOffsets[coverage_index]));
@@ -967,7 +1296,8 @@ static bool apply_ChainedSequenceSubstitution(const Chain *chain, const GenericC
         uint16_t backtrackGlyphCount = parse_16(backtrackSequenceRule->backtrackGlyphCount);
         const ChainedSequenceRule_input *inputSequenceRule = (ChainedSequenceRule_input *)((uint8_t *)backtrackSequenceRule + sizeof(uint16_t) * (backtrackGlyphCount + 1));
         uint16_t inputGlyphCount = parse_16(inputSequenceRule->inputGlyphCount);
-        const ChainedSequenceRule_lookahead *lookaheadSequenceRule = (ChainedSequenceRule_lookahead *)((uint8_t *)inputSequenceRule + sizeof(uint16_t) * (inputGlyphCount)); // inputGlyphCount includes the initial one, that's not present in the array
+        // inputGlyphCount includes the initial one, that's not present in the array, so no need to +1 here
+        const ChainedSequenceRule_lookahead *lookaheadSequenceRule = (ChainedSequenceRule_lookahead *)((uint8_t *)inputSequenceRule + sizeof(uint16_t) * (inputGlyphCount));
         uint16_t lookaheadGlyphCount = parse_16(lookaheadSequenceRule->lookaheadGlyphCount);
         const ChainedSequenceRule_seq *sequenceRule = (ChainedSequenceRule_seq *)((uint8_t *)lookaheadSequenceRule + sizeof(uint16_t) * (lookaheadGlyphCount + 1));
         uint16_t seqLookupCount = parse_16(sequenceRule->seqLookupCount);
@@ -989,7 +1319,7 @@ static bool apply_ChainedSequenceSubstitution(const Chain *chain, const GenericC
           continue;
         }
 
-        apply_sequence_rule(chain, inputGlyphCount, sequenceRule->seqLookupRecords, seqLookupCount, glyph_array, index);
+        apply_SequenceRule(chain, inputGlyphCount, sequenceRule->seqLookupRecords, seqLookupCount, glyph_array, index);
         return true;
       }
       break;
@@ -997,7 +1327,7 @@ static bool apply_ChainedSequenceSubstitution(const Chain *chain, const GenericC
     case ChainedSequenceContextFormat_2: {
       const ChainedSequenceContextFormat2 *chainedSequenceContext = (ChainedSequenceContextFormat2 *)genericChainedSequence;
       const CoverageTable *coverageTable = (CoverageTable *)((uint8_t *)chainedSequenceContext + parse_16(chainedSequenceContext->coverageOffset));
-      bool applicable = find_in_coverage(coverageTable, glyph_array->array[*index], NULL);
+      bool applicable = find_in_Coverage(coverageTable, glyph_array->array[*index], NULL);
       if (!applicable) return false;
 
       const ClassDefGeneric *inputClassDef = (ClassDefGeneric *)((uint8_t *)chainedSequenceContext + parse_16(chainedSequenceContext->inputClassDefOffset));
@@ -1045,7 +1375,7 @@ static bool apply_ChainedSequenceSubstitution(const Chain *chain, const GenericC
           continue;
         }
 
-        apply_sequence_rule(chain, inputGlyphCount, sequenceRule->seqLookupRecords, seqLookupCount, glyph_array, index);
+        apply_SequenceRule(chain, inputGlyphCount, sequenceRule->seqLookupRecords, seqLookupCount, glyph_array, index);
         // Only use the first one that matches.
         return true;
       }
@@ -1080,7 +1410,7 @@ static bool apply_ChainedSequenceSubstitution(const Chain *chain, const GenericC
 
       if (inputGlyphCount == 0) return true;
 
-      apply_sequence_rule(chain, inputGlyphCount, seqCoverage->seqLookupRecords, seqLookupCount, glyph_array, index);
+      apply_SequenceRule(chain, inputGlyphCount, seqCoverage->seqLookupRecords, seqLookupCount, glyph_array, index);
       return true;
     }
     default:
@@ -1096,7 +1426,7 @@ static bool apply_ReverseChainingContextSingleLookupType(const ReverseChainSingl
   switch (parse_16(reverseChain->substFormat)) {
     case ReverseChainSingleSubstFormat_1: {
       uint32_t coverage_index;
-      bool applicable = find_in_coverage(coverageTable, glyph_array->array[index], &coverage_index);
+      bool applicable = find_in_Coverage(coverageTable, glyph_array->array[index], &coverage_index);
       if (!applicable) return false;
 
       const ReverseChainSingleSubstFormat1_backtrack *backtrackCoverage = (ReverseChainSingleSubstFormat1_backtrack *)((uint8_t *)reverseChain + sizeof(uint16_t) * 2);
@@ -1133,7 +1463,7 @@ static bool apply_ReverseChainingContextSingleLookupType(const ReverseChainSingl
   return false;
 }
 
-static bool apply_lookup_subtable(const Chain *chain, GlyphArray* glyph_array, const GenericSubstTable *genericSubstTable, uint16_t lookupType, size_t *index) {
+static bool apply_Substitution(const Chain *chain, GlyphArray* glyph_array, const GenericSubstTable *genericSubstTable, uint16_t lookupType, size_t *index) {
   switch (lookupType) {
     case SingleLookupType: {
       const SingleSubstFormatGeneric *singleSubstFormatGeneric = (SingleSubstFormatGeneric *)genericSubstTable;
@@ -1167,7 +1497,7 @@ static bool apply_lookup_subtable(const Chain *chain, GlyphArray* glyph_array, c
     case ExtensionSubstitutionLookupType: {
       const ExtensionSubstitutionTable *extensionSubstitutionTable = (ExtensionSubstitutionTable *)genericSubstTable;
       const GenericSubstTable *_genericSubstTable = (GenericSubstTable *)((uint8_t *)extensionSubstitutionTable + parse_32(extensionSubstitutionTable->extensionOffset));
-      return apply_lookup_subtable(chain, glyph_array, _genericSubstTable, parse_16(extensionSubstitutionTable->extensionLookupType), index);
+      return apply_Substitution(chain, glyph_array, _genericSubstTable, parse_16(extensionSubstitutionTable->extensionLookupType), index);
     }
     case ReverseChainingContextSingleLookupType: {
       const ReverseChainSingleSubstFormat1 *reverseChain = (ReverseChainSingleSubstFormat1 *)genericSubstTable;
@@ -1180,36 +1510,155 @@ static bool apply_lookup_subtable(const Chain *chain, GlyphArray* glyph_array, c
   }
 }
 
-static void apply_Lookup_index(const Chain *chain, const LookupTable *lookupTable, GlyphArray* glyph_array, size_t *index) {
+// Returns the bloom digest that matches with the glyphs that "start" a Substitution table.
+static Bloom get_Substitution_bloom(const GenericSubstTable *genericSubstTable, uint16_t lookupType) {
+  switch (lookupType) {
+    case SingleLookupType: {
+      const SingleSubstFormatGeneric *singleSubstFormatGeneric = (SingleSubstFormatGeneric *)genericSubstTable;
+      const CoverageTable *coverageTable = (CoverageTable *)((uint8_t *)singleSubstFormatGeneric + parse_16(singleSubstFormatGeneric->coverageOffset));
+      return get_Coverage_bloom(coverageTable);
+    }
+    case MultipleLookupType: {
+      const MultipleSubstFormat1 *multipleSubstFormat = (MultipleSubstFormat1 *)genericSubstTable;
+      const CoverageTable *coverageTable = (CoverageTable *)((uint8_t *)multipleSubstFormat + parse_16(multipleSubstFormat->coverageOffset));
+      return get_Coverage_bloom(coverageTable);
+    }
+    case AlternateLookupType:
+      // No need to make it go through, as we don't support it
+      return null_bloom;
+    case LigatureLookupType: {
+      const LigatureSubstitutionTable *ligatureSubstitutionTable = (LigatureSubstitutionTable *)genericSubstTable;
+      const CoverageTable *coverageTable = (CoverageTable *)((uint8_t *)ligatureSubstitutionTable + parse_16(ligatureSubstitutionTable->coverageOffset));
+      return get_Coverage_bloom(coverageTable);
+    }
+    case ContextLookupType: {
+      const GenericSequenceContextFormat *genericSequence = (GenericSequenceContextFormat *)genericSubstTable;
+      return get_SequenceSubstitution_bloom(genericSequence);
+    }
+    case ChainingLookupType: {
+      const GenericChainedSequenceContextFormat *genericChainedSequence = (GenericChainedSequenceContextFormat *)genericSubstTable;
+      return get_ChainedSequenceSubstitution_bloom(genericChainedSequence);
+    }
+    case ExtensionSubstitutionLookupType: {
+      const ExtensionSubstitutionTable *extensionSubstitutionTable = (ExtensionSubstitutionTable *)genericSubstTable;
+      const GenericSubstTable *_genericSubstTable = (GenericSubstTable *)((uint8_t *)extensionSubstitutionTable + parse_32(extensionSubstitutionTable->extensionOffset));
+      return get_Substitution_bloom(_genericSubstTable, parse_16(extensionSubstitutionTable->extensionLookupType));
+    }
+    case ReverseChainingContextSingleLookupType: {
+      const ReverseChainSingleSubstFormat1 *reverseChain = (ReverseChainSingleSubstFormat1 *)genericSubstTable;
+      const CoverageTable *coverageTable = (CoverageTable *)((uint8_t *)reverseChain + parse_16(reverseChain->coverageOffset));
+      return get_Coverage_bloom(coverageTable);
+    }
+    default:
+      fprintf(stderr, "UNKNOWN LookupType\n");
+      return full_bloom;
+  }
+}
+
+// Returns the bloom digest that matches with the glyphs that "start" any of the
+// Substitution tables of the Lookup.
+static Bloom get_cached_Lookup_bloom(const Chain *chain, const LookupTable *lookupTable, uint16_t lookupType) {
+  Bloom lookup_bloom = null_bloom;
+  if (!get_from_Bloom_hash(chain->bloom_hash, lookupTable, &lookup_bloom)) {
+    uint16_t subTableCount = parse_16(lookupTable->subTableCount);
+    for (uint16_t i = 0; i < subTableCount; i++) {
+      const GenericSubstTable *genericSubstTable = (GenericSubstTable *)((uint8_t *)lookupTable + parse_16(lookupTable->subtableOffsets[i]));
+      Bloom _bloom = null_bloom;
+      if (!get_from_Bloom_hash(chain->bloom_hash, genericSubstTable, &_bloom)) {
+        _bloom = get_Substitution_bloom(genericSubstTable, lookupType);
+        set_to_Bloom_hash(chain->bloom_hash, genericSubstTable, _bloom);
+      }
+      lookup_bloom = add_bloom_to_bloom(lookup_bloom, _bloom);
+      if (is_full_bloom(lookup_bloom)) break;
+    }
+    set_to_Bloom_hash(chain->bloom_hash, lookupTable, lookup_bloom);
+  }
+  return lookup_bloom;
+}
+
+// Returns the bloom digests for all the Substitution tables of the Lookup.
+static Bloom *get_cached_Substitution_blooms_for_Lookup(const Chain *chain, const LookupTable *lookupTable, uint16_t lookupType) {
+  Bloom* sub_blooms = NULL;
+  if (!get_from_uintptr_t_hash(chain->ptr_hash, lookupTable, (uintptr_t*)&sub_blooms)){
+    uint16_t subTableCount = parse_16(lookupTable->subTableCount);
+    sub_blooms = malloc(subTableCount * sizeof(Bloom));
+    if (sub_blooms == NULL) return NULL; // TODO: panic?
+
+    for (uint16_t i = 0; i < subTableCount; i++) {
+      const GenericSubstTable *genericSubstTable = (GenericSubstTable *)((uint8_t *)lookupTable + parse_16(lookupTable->subtableOffsets[i]));
+      Bloom _bloom = null_bloom;
+      if (!get_from_Bloom_hash(chain->bloom_hash, genericSubstTable, &_bloom)) {
+        _bloom = get_Substitution_bloom(genericSubstTable, lookupType);
+        set_to_Bloom_hash(chain->bloom_hash, genericSubstTable, _bloom);
+      }
+      sub_blooms[i] = _bloom;
+    }
+    set_to_uintptr_t_hash(chain->ptr_hash, lookupTable, (uintptr_t)sub_blooms);
+  }
+  return sub_blooms;
+}
+
+static void apply_Lookup_at_index(const Chain *chain, const LookupTable *lookupTable, const Bloom* blooms, GlyphArray* glyph_array, size_t *index) {
   uint16_t lookupType = parse_16(lookupTable->lookupType);
-  // Stop at the first substitution that's successfully applied.
+  uint16_t glyphID = glyph_array->array[*index];
+  Bloom glyphID_bloom = get_glyphID_bloom(glyphID);
+
+  // Obtain the bloom digests of the Substitution tables of the Lookup.
+  // We get NULL here when we come from apply_SequenceRule.
+  if (blooms == NULL) {
+    blooms = get_cached_Substitution_blooms_for_Lookup(chain, lookupTable, lookupType);
+  }
+
+  // Stop at the first Substitution that's successfully applied.
   uint16_t subTableCount = parse_16(lookupTable->subTableCount);
   for (uint16_t i = 0; i < subTableCount; i++) {
     const GenericSubstTable *genericSubstTable = (GenericSubstTable *)((uint8_t *)lookupTable + parse_16(lookupTable->subtableOffsets[i]));
-    if (apply_lookup_subtable(chain, glyph_array, genericSubstTable, lookupType, index)) {
+    if (blooms != NULL) {
+      // If the glyph doesn't match the bloom digest for the Substitution, skip it.
+      if (!glyphID_bloom_compare_bloom(glyphID_bloom, blooms[i])) {
+        continue;
+      }
+    }
+    if (apply_Substitution(chain, glyph_array, genericSubstTable, lookupType, index)) {
       break;
     }
   }
 }
 
-
 static void apply_Lookup(const Chain *chain, const LookupTable *lookupTable, GlyphArray* glyph_array) {
   size_t index = 0, reverse_index = glyph_array->len - 1, *index_ptr = &index;
   uint16_t lookupType = parse_16(lookupTable->lookupType);
+  // ReverseChaining needs to be applied in reverse order.
   if (lookupType == ReverseChainingContextSingleLookupType)
     index_ptr = &reverse_index;
-  // For each glyph
+
+  // Get bloom for the whole lookup.
+  Bloom lookup_bloom = get_cached_Lookup_bloom(chain, lookupTable, lookupType);
+
+  // If no glyph in the input matches any of the Substitutions, skip the Lookup.
+  Bloom ga_bloom = GlyphArray_get_bloom(glyph_array);
+  if (!bloom_compare_bloom(ga_bloom, lookup_bloom)) {
+    return;
+  }
+
+  // Extract list of blooms from the hashtable to let apply_Lookup_at_index skip
+  // getting them for each glyph.
+  Bloom* sub_blooms = get_cached_Substitution_blooms_for_Lookup(chain, lookupTable, lookupType);
+
   while (index < glyph_array->len) {
-    apply_Lookup_index(chain, lookupTable, glyph_array, index_ptr);
+    // If the current glyph doesn't match any of the Substitutions, skip it.
+    if ((glyphID_compare_bloom(glyph_array->array[*index_ptr], lookup_bloom))) {
+      apply_Lookup_at_index(chain, lookupTable, sub_blooms, glyph_array, index_ptr);
+    }
     index++;
-    reverse_index = glyph_array->len - index - 1;
+    // ReverseChaining doesn't change the number of glyphs, so we can just do --.
+    reverse_index--;
   }
 }
 
 GlyphArray *apply_chain(const Chain *chain, const GlyphArray* glyph_array) {
   GlyphArray *ga = GlyphArray_new_from_GlyphArray(glyph_array);
   for (size_t i = 0; i < chain->lookupCount; i++) {
-    // printf("Applying lookup %ld\n", i);
     apply_Lookup(chain, chain->lookupsArray[i], ga);
   }
   return ga;
