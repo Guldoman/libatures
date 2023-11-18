@@ -2,483 +2,16 @@
 #include <stdio.h>
 #include <stdbool.h>
 
-#include <ft2build.h>
-#include FT_TRUETYPE_TAGS_H
-#include FT_TRUETYPE_TABLES_H
-#include FT_FREETYPE_H
-
 #include "gsub.h"
-
-#if defined(_MSC_VER)
-#include <BaseTsd.h>
-typedef SSIZE_T ssize_t;
-#endif
-
-
-// Bloom digest implementation inspired from Harfbuzz's
-
-typedef uint64_t bloom_part;
-typedef struct Bloom {
-  bloom_part a, b, c;
-} Bloom;
-
-#define bloom_shift_a 9
-#define bloom_shift_b 0
-#define bloom_shift_c 4
-#define mask_bits (ssize_t)(sizeof(bloom_part) * 8)
-#define get_mask(x, shift) ((bloom_part) 1) << (((x) >> (shift)) & (mask_bits - 1))
-
-#define null_bloom ((Bloom){.a = 0, .b = 0, .c = 0})
-#define full_bloom ((Bloom){.a = (bloom_part)-1,                               \
-                            .b = (bloom_part)-1,                               \
-                            .c = (bloom_part)-1})
-
-#define is_full_bloom(x) ((x).a == full_bloom.a &&                             \
-                          (x).b == full_bloom.b &&                             \
-                          (x).c == full_bloom.c)
-
-#define get_glyphID_bloom(x) ((Bloom){.a = get_mask((x), (9)),                 \
-                                      .b = get_mask((x), (0)),                 \
-                                      .c = get_mask((x), (4))})
-
-static inline Bloom get_glyphID_range_bloom(uint16_t glyphID_a, uint16_t glyphID_b) {
-  Bloom new_bloom = full_bloom;
-  if ((glyphID_b >> bloom_shift_a) - (glyphID_a >> bloom_shift_a) < mask_bits - 1) {
-    bloom_part part_a = get_mask(glyphID_a, bloom_shift_a);
-    bloom_part part_b = get_mask(glyphID_b, bloom_shift_a);
-    new_bloom.a = part_b + (part_b - part_a) - (part_b < part_a);
-  }
-  if ((glyphID_b >> bloom_shift_b) - (glyphID_a >> bloom_shift_b) < mask_bits - 1) {
-    bloom_part part_a = get_mask(glyphID_a, bloom_shift_b);
-    bloom_part part_b = get_mask(glyphID_b, bloom_shift_b);
-    new_bloom.b = part_b + (part_b - part_a) - (part_b < part_a);
-  }
-  if ((glyphID_b >> bloom_shift_c) - (glyphID_a >> bloom_shift_c) < mask_bits - 1) {
-    bloom_part part_a = get_mask(glyphID_a, bloom_shift_c);
-    bloom_part part_b = get_mask(glyphID_b, bloom_shift_c);
-    new_bloom.c = part_b + (part_b - part_a) - (part_b < part_a);
-  }
-  return new_bloom;
-}
-
-#define add_glyphID_to_bloom(bloom, x) ((Bloom){.a = (bloom).a | get_glyphID_bloom(x).a,\
-                                                .b = (bloom).b | get_glyphID_bloom(x).b,\
-                                                .c = (bloom).c | get_glyphID_bloom(x).c})
-
-#define add_bloom_to_bloom(bloom_a, bloom_b) ((Bloom){.a = (bloom_a).a | (bloom_b).a,\
-                                                      .b = (bloom_a).b | (bloom_b).b,\
-                                                      .c = (bloom_a).c | (bloom_b).c})
-
-#define bloom_compare_bloom(bloom_a, bloom_b) ((bloom_a).a & (bloom_b).a &&    \
-                                               (bloom_a).b & (bloom_b).b &&    \
-                                               (bloom_a).c & (bloom_b).c)
-
-#define glyphID_bloom_compare_bloom(glyphID_bloom, bloom) (((glyphID_bloom).a & (bloom).a) == (glyphID_bloom).a &&\
-                                                           ((glyphID_bloom).b & (bloom).b) == (glyphID_bloom).b &&\
-                                                           ((glyphID_bloom).c & (bloom).c) == (glyphID_bloom).c)
-
-#define glyphID_compare_bloom(glyphID, bloom) (glyphID_bloom_compare_bloom(get_glyphID_bloom(glyphID), (bloom)))
-
-
-typedef struct GlyphArray {
-  size_t len;
-  size_t allocated;
-  uint16_t *array;
-  Bloom bloom;
-  bool bloom_valid;
-} GlyphArray;
-
-GlyphArray *GlyphArray_new(size_t size) {
-  GlyphArray *ga = malloc(sizeof(GlyphArray));
-  if (ga == NULL) return NULL;
-  ga->len = 0;
-  ga->allocated = size;
-  ga->bloom = null_bloom;
-  ga->bloom_valid = true;
-  ga->array = malloc(sizeof(uint16_t) * size);
-  if (ga->array == NULL) {
-    free(ga);
-    return NULL;
-  }
-  return ga;
-}
-
-void GlyphArray_free(GlyphArray *ga) {
-  if (ga == NULL) return;
-  free(ga->array);
-  ga->array = NULL;
-  free(ga);
-}
-
-
-bool GlyphArray_set1(GlyphArray *glyph_array, size_t index, uint16_t data) {
-  GlyphArray *ga = glyph_array;
-  if (index > ga->len) {
-    return false;
-  }
-  ga->bloom_valid = false;
-  ga->array[index] = data;
-  return true;
-}
-
-bool GlyphArray_set(GlyphArray *glyph_array, size_t from, const uint16_t *data, size_t data_size) {
-  GlyphArray *ga = glyph_array;
-  if (from > ga->len) {
-    // TODO: error out maybe?
-    return false;
-  }
-  ga->bloom_valid = false;
-  if (from + data_size > ga->len) {
-    size_t remainder = (from + data_size) - ga->len;
-    if (ga->len + remainder > ga->allocated) {
-      size_t new_size = (ga->len + remainder) * 1.3;
-      if (new_size < ga->allocated) {
-        // Would have overflown
-        return false;
-      }
-      // Need to do overlapped operation, but we're risking reallocation.
-      // We could lose the "old" location before we can actually do the operation,
-      // so we back it up first.
-      if ((data >= ga->array && data < ga->array + ga->len) ||
-          (data + data_size > ga->array && data + data_size <= ga->array + ga->len)) {
-        uint16_t *new_array = NULL;
-        new_array = malloc(sizeof(uint16_t) * new_size);
-        if (new_array == NULL) return false;
-        memcpy(new_array, ga->array, ga->len * sizeof(uint16_t));
-        uint16_t *old_array = ga->array;
-        ga->array = new_array;
-        ga->allocated = new_size;
-
-        bool res = GlyphArray_set(ga, from, data, data_size);
-        free(old_array);
-        return res;
-      }
-      uint16_t *_array = realloc(ga->array, sizeof(uint16_t) * new_size);
-      if (_array == NULL) {
-        return false;
-      }
-      ga->array = _array;
-      ga->allocated = new_size;
-    }
-    ga->len += remainder;
-  }
-  memcpy(&ga->array[from], data, data_size * sizeof(uint16_t));
-  return true;
-}
-
-bool GlyphArray_put(GlyphArray *dst, size_t dst_index, GlyphArray *src, size_t src_index, size_t len) {
-  if (src_index + len > src->len) return false;
-  return GlyphArray_set(dst, dst_index, &src->array[src_index], len);
-}
-
-bool GlyphArray_shrink(GlyphArray *glyph_array, size_t reduction) {
-  GlyphArray *ga = glyph_array;
-  if (reduction > ga->len) {
-    return false;
-  }
-  ga->bloom_valid = false;
-  ga->len -= reduction;
-  return true;
-}
-
-bool GlyphArray_append(GlyphArray *glyph_array, const uint16_t *data, size_t data_size) {
-  return GlyphArray_set(glyph_array, glyph_array->len, data, data_size);
-}
-
-static GlyphArray * GlyphArray_new_from_GlyphArray(const GlyphArray *glyph_array) {
-  GlyphArray *ga = GlyphArray_new(glyph_array->len);
-  if (ga == NULL) return NULL;
-  if (!GlyphArray_append(ga, glyph_array->array, glyph_array->len)) {
-    GlyphArray_free(ga);
-    return NULL;
-  }
-  if (glyph_array->bloom_valid) {
-    ga->bloom = glyph_array->bloom;
-    ga->bloom_valid = true;
-  }
-  return ga;
-}
-
-const uint16_t* GlyphArray_get(GlyphArray *glyph_array, size_t *length) {
-  if(length != NULL) *length = glyph_array->len;
-  return glyph_array->array;
-}
-
-static const char* utf8_to_codepoint(const char *p, unsigned *dst) {
-  const unsigned char *up = (unsigned char*)p;
-  unsigned res, n;
-  switch (*p & 0xf0) {
-    case 0xf0 :  res = *up & 0x07;  n = 3;  break;
-    case 0xe0 :  res = *up & 0x0f;  n = 2;  break;
-    case 0xd0 :
-    case 0xc0 :  res = *up & 0x1f;  n = 1;  break;
-    default   :  res = *up;         n = 0;  break;
-  }
-  while (n--) {
-    res = (res << 6) | (*(++up) & 0x3f);
-  }
-  *dst = res;
-  return (const char*)up + 1;
-}
-
-GlyphArray *GlyphArray_new_from_utf8(FT_Face face, const char *string, size_t len) {
-  // For now use the utf8 length, which will be at least as long as the resulting glyphId array.
-  // TODO: this can be as much as 4X the size we actually need, so maybe precalculate the actual size.
-  GlyphArray *ga = GlyphArray_new(len);
-  const char* end = string + len;
-  while (string < end) {
-    uint32_t codepoint;
-    string = utf8_to_codepoint(string, &codepoint);
-    ga->array[ga->len++] = FT_Get_Char_Index(face, codepoint);
-  }
-  ga->bloom_valid = false;
-  return ga;
-}
-
-GlyphArray *GlyphArray_new_from_data(uint16_t *data, size_t len) {
-  GlyphArray *ga = GlyphArray_new(len);
-  if (ga == NULL) return NULL;
-  GlyphArray_set(ga, 0, data, len);
-  return ga;
-}
-
-bool GlyphArray_compare(GlyphArray *ga1, GlyphArray *ga2) {
-  if (ga1->len != ga2->len) return false;
-  if (memcmp(ga1->array, ga2->array, ga1->len) != 0) return false;
-  return true;
-}
-
-void GlyphArray_print(GlyphArray *ga) {
-  for (size_t i = 0; i < ga->len; i++) {
-    printf("%d ", ga->array[i]);
-  }
-  printf("\n");
-}
-
-void GlyphArray_print2(FT_Face face, GlyphArray *ga) {
-  for (size_t i = 0; i < ga->len; i++) {
-    char name[50];
-    FT_Get_Glyph_Name(face, ga->array[i], name, 50);
-    printf("[%s] ", name);
-  }
-  printf("\n");
-}
-
-static Bloom GlyphArray_get_bloom(const GlyphArray *ga) {
-  if (ga->bloom_valid) return ga->bloom;
-  GlyphArray *_ga = (GlyphArray*)ga; // Discard const, because it's only fair
-  for (size_t i = 0; i < _ga->len; i++) {
-    _ga->bloom = add_glyphID_to_bloom(_ga->bloom, _ga->array[i]);
-    // If the bloom already covers everything, we can stop...
-    if (is_full_bloom(_ga->bloom)) break;
-  }
-  _ga->bloom_valid = true;
-  return _ga->bloom;
-}
-
-void test_GlyphArray(FT_Face face) {
-  const char *string = "Hello moto";
-  const char *string2 = "12345";
-  GlyphArray *ga1 = GlyphArray_new_from_utf8(face, string, strlen(string));
-  GlyphArray *ga1_orig = GlyphArray_new_from_GlyphArray(ga1);
-  GlyphArray *ga2 = GlyphArray_new_from_utf8(face, string2, strlen(string2));
-  GlyphArray_print(ga1);
-  GlyphArray_print(ga2);
-  GlyphArray_append(ga1, ga2->array, ga2->len);
-  GlyphArray_print(ga1);
-  GlyphArray *ga3 = GlyphArray_new_from_GlyphArray(ga1);
-  if (!GlyphArray_compare(ga1, ga3)) {
-    printf("ERROR 1\n");
-  }
-  GlyphArray_shrink(ga1, ga2->len);
-  GlyphArray_print(ga1);
-  if (!GlyphArray_compare(ga1, ga1_orig)) {
-    printf("ERROR 2\n");
-  }
-  GlyphArray_append(ga1, ga2->array, ga2->len);
-  GlyphArray_print(ga1);
-  if (!GlyphArray_compare(ga1, ga3)) {
-    printf("ERROR 3\n");
-  }
-  GlyphArray_free(ga1);
-  GlyphArray_free(ga1_orig);
-  GlyphArray_free(ga2);
-  GlyphArray_free(ga3);
-
-  printf("###\n");
-  ga1 = GlyphArray_new_from_utf8(face, string, strlen(string));
-  GlyphArray_print(ga1);
-  GlyphArray_set(ga1, ga1->len, &ga1->array[6], 4);
-  GlyphArray_print(ga1);
-  GlyphArray_free(ga1);
-}
-
-
-/** +++++++++++++++++++++++ **/
-
-// https://github.com/google/cityhash/blob/f5dc54147fcce12cefd16548c8e760d68ac04226/src/city.cc#L50-L94
-#if defined(_MSC_VER)
-
-#include <stdlib.h>
-#define bswap_16(x) _byteswap_ushort(x)
-#define bswap_32(x) _byteswap_ulong(x)
-
-#elif defined(__APPLE__)
-
-// Mac OS X / Darwin features
-#include <libkern/OSByteOrder.h>
-#define bswap_16(x) OSSwapInt16(x)
-#define bswap_32(x) OSSwapInt32(x)
-
-#elif defined(__sun) || defined(sun)
-
-#include <sys/byteorder.h>
-#define bswap_16(x) BSWAP_16(x)
-#define bswap_32(x) BSWAP_32(x)
-
-#elif defined(__FreeBSD__)
-
-#include <sys/endian.h>
-#define bswap_16(x) bswap16(x)
-#define bswap_32(x) bswap32(x)
-
-#elif defined(__OpenBSD__)
-
-#include <sys/types.h>
-#define bswap_16(x) swap16(x)
-#define bswap_32(x) swap32(x)
-
-#elif defined(__NetBSD__)
-
-#include <sys/types.h>
-#include <machine/bswap.h>
-#if defined(__BSWAP_RENAME) && !defined(__bswap_32)
-#define bswap_16(x) bswap16(x)
-#define bswap_32(x) bswap32(x)
-#endif
-
-#elif defined(__MINGW32__)
-
-#define bswap_16(x) __builtin_bswap16(x)
-#define bswap_32(x) __builtin_bswap32(x)
-
-#else
-
-#include <byteswap.h>
-
-#endif
-
-#if ((__BYTE_ORDER__) == (__ORDER_LITTLE_ENDIAN__))
-#define parse_16(x) bswap_16(x)
-#define parse_32(x) bswap_32(x)
-#else
-#define parse_16(x) (x)
-#define parse_32(x) (x)
-#endif
-
-
-#define HASH_SIZE 3769
-#define HASH_RETRIES 10
-#define HASH(x) ((((x) >> 1)) % hash->size)
-
-
-#define build_hash_functions(type)                                             \
-typedef struct {                                                               \
-  const void *address;                                                         \
-  type value;                                                                  \
-} HashEntry_##type;                                                            \
-typedef struct {                                                               \
-  size_t size;                                                                 \
-  size_t occupied;                                                             \
-  HashEntry_##type *entries;                                                   \
-} HashTable_##type;                                                            \
-static HashTable_##type *new_##type##_hash(void) {                             \
-  HashTable_##type *hash = malloc(sizeof(HashTable_##type));                   \
-  if (hash == NULL) return NULL;                                               \
-  *hash = (HashTable_##type){                                                  \
-    .size = HASH_SIZE,                                                         \
-    .occupied = 0,                                                             \
-    .entries = calloc(HASH_SIZE, sizeof(HashEntry_##type)),                    \
-  };                                                                           \
-  if (hash->entries == NULL) {                                                 \
-    free(hash);                                                                \
-    return NULL;                                                               \
-  }                                                                            \
-  return hash;                                                                 \
-}                                                                              \
-static inline bool get_from_##type##_hash(HashTable_##type *hash, const void* address, type *value) { \
-  size_t index = HASH((uintptr_t)address);                                     \
-  HashEntry_##type *entries = hash->entries;                                   \
-  for (size_t retries = 0; entries[index].address != NULL; retries++) {        \
-    if (entries[index].address == address) {                                   \
-      *value = entries[index].value;                                           \
-      return true;                                                             \
-    }                                                                          \
-    if (retries >= HASH_RETRIES) return false;                                 \
-    index = (index + 1) % hash->size;                                          \
-  }                                                                            \
-  return false;                                                                \
-}                                                                              \
-static bool resize_##type##_hash(HashTable_##type *hash);                      \
-static void set_to_##type##_hash(HashTable_##type *hash, const void* address, type value) { \
-  size_t index = HASH((uintptr_t)address);                                     \
-  HashEntry_##type *entries = hash->entries;                                   \
-  size_t retries;                                                              \
-  for (retries = 0; entries[index].address != NULL; retries++){                \
-    if (retries >= HASH_RETRIES || hash->occupied > hash->size / 3) {          \
-      bool success = resize_##type##_hash(hash);                               \
-      if (success) {                                                           \
-        set_to_##type##_hash(hash, address, value);                            \
-        return;                                                                \
-      }                                                                        \
-    }                                                                          \
-    if (retries >= HASH_RETRIES) return;                                       \
-    index = (index + 1) % hash->size;                                          \
-  }                                                                            \
-  entries[index].address = address;                                            \
-  entries[index].value = value;                                                \
-  hash->occupied++;                                                            \
-  return;                                                                      \
-}                                                                              \
-static bool resize_##type##_hash(HashTable_##type *hash) {                     \
-  size_t sizes[] = {4969, 7699, 9769, 11969, 14207, 17669, 22699, 29669, 34693, 44201}; \
-  size_t new_size = 0;                                                         \
-  for (size_t i = 0; i < sizeof(sizes)/sizeof(size_t); i++) {                  \
-    if (sizes[i] > hash->size) {                                               \
-      new_size = sizes[i];                                                     \
-      break;                                                                   \
-    }                                                                          \
-  }                                                                            \
-  if (new_size == 0) return false;                                             \
-  HashEntry_##type *new_entries = calloc(new_size, sizeof(HashEntry_##type));  \
-  if (new_entries == NULL) return false;                                       \
-  HashEntry_##type *old_entries = hash->entries;                               \
-  size_t old_size = hash->size;                                                \
-  hash->size = new_size;                                                       \
-  hash->occupied = 0;                                                          \
-  hash->entries = new_entries;                                                 \
-  for (size_t i = 0; i < old_size; i++) {                                      \
-    HashEntry_##type entry = old_entries[i];                                   \
-    if (entry.address != NULL) {                                               \
-      set_to_##type##_hash(hash, entry.address, entry.value);                  \
-    }                                                                          \
-  }                                                                            \
-  free(old_entries);                                                           \
-  return true;                                                                 \
-}                                                                              \
-static void free_##type##_hash(HashTable_##type *hash) {                       \
-  if (hash == NULL) return;                                                    \
-  free(hash->entries);                                                         \
-  hash->entries = NULL;                                                        \
-  hash->size = 0;                                                              \
-  hash->occupied = 0;                                                          \
-  free(hash);                                                                  \
-}
+#include "bloom.h"
+#include "glypharray.h"
+#include "bswap.h"
+#include "hash.h"
 
 build_hash_functions(Bloom)
 build_hash_functions(uintptr_t)
 
-typedef struct Chain {
+typedef struct LBT_Chain {
   const LookupTable * const *lookupsArray;
   size_t lookupCount;
   const GsubHeader *gsubHeader;
@@ -686,29 +219,6 @@ end:
   return c;
 }
 
-static FT_Error get_gsub(FT_Face face, uint8_t **table) {
-  FT_Error error;
-  FT_ULong table_len = 0;
-  *table = NULL;
-  // Get size only
-  error = FT_Load_Sfnt_Table(face, TTAG_GSUB, 0, NULL, &table_len);
-  if (error == FT_Err_Table_Missing) {
-    return FT_Err_Ok;
-  }
-  if (error) {
-    return error;
-  }
-
-  *table = (uint8_t *)malloc(table_len);
-  if (table == NULL) {
-    return FT_Err_Out_Of_Memory;
-  }
-
-  error = FT_Load_Sfnt_Table(face, TTAG_GSUB, 0, *table, &table_len);
-
-  return error;
-}
-
 // Generates a chain of Lookups to apply in order, given the script and language selected,
 // as well as the features enabled.
 // script and lang can be NULL to select the default ones.
@@ -716,17 +226,12 @@ static FT_Error get_gsub(FT_Face face, uint8_t **table) {
 // Some fonts specify required features; use the tag `{' ', 'R', 'Q', 'D'}` in the features
 // to specify where it belongs in the chain.
 // Use `get_required_feature` if the tag is needed to decide where to place it.
-Chain *generate_chain(FT_Face face, const unsigned char (*script)[4], const unsigned char (*lang)[4], const unsigned char (*features)[4], size_t n_features) {
-  uint8_t *GSUB_table = NULL;
+Chain *generate_chain(const uint8_t *GSUB_table, const unsigned char (*script)[4], const unsigned char (*lang)[4], const unsigned char (*features)[4], size_t n_features) {
   LookupTable **lookupsArray = NULL;
-  if (get_gsub(face, &GSUB_table) != 0) {
-    return NULL;
-  }
 
   if (GSUB_table == NULL) {
-    // There is no GSUB table.
-    // TODO: should this just be an empty chain?
-    goto fail;
+    // There is no GSUB table, so return an empty chain
+    return calloc(1, sizeof(Chain));
   }
 
   const GsubHeader *gsubHeader = (GsubHeader *)GSUB_table;
@@ -771,7 +276,7 @@ Chain *generate_chain(FT_Face face, const unsigned char (*script)[4], const unsi
   return chain;
 
 fail:
-  free(GSUB_table);
+  // free(GSUB_table);
   free(lookupsArray);
   return NULL;
 
@@ -782,7 +287,7 @@ fail_chain:
 
 void destroy_chain(Chain *chain) {
   if (chain == NULL) return;
-  free((void *)chain->gsubHeader);
+  // free((void *)chain->gsubHeader);
   free((void *)chain->lookupsArray);
   free_Bloom_hash(chain->bloom_hash);
   // uintptr_t_hash has malloc'd stuff inside, so free that first
@@ -800,12 +305,8 @@ void destroy_chain(Chain *chain) {
 // Returns whether the specified script and language combo has a required feature.
 // `script` and `lang` can be NULL to select the default ones.
 // Writes in `required_feature` the tag.
-bool get_required_feature(const FT_Face face, const unsigned char (*script)[4], const unsigned char (*lang)[4], unsigned char (*required_feature)[4]) {
-  uint8_t *GSUB_table = NULL;
+bool get_required_feature(const uint8_t *GSUB_table, const unsigned char (*script)[4], const unsigned char (*lang)[4], unsigned char (*required_feature)[4]) {
   bool result = false;
-  if (get_gsub(face, &GSUB_table) != 0) {
-    return NULL;
-  }
 
   if (GSUB_table == NULL) {
     goto end;
@@ -832,7 +333,7 @@ bool get_required_feature(const FT_Face face, const unsigned char (*script)[4], 
   }
 
 end:
-  free(GSUB_table);
+  // free(GSUB_table);
   return result;
 }
 
@@ -1656,11 +1157,9 @@ static void apply_Lookup(const Chain *chain, const LookupTable *lookupTable, Gly
   }
 }
 
-GlyphArray *apply_chain(const Chain *chain, const GlyphArray* glyph_array) {
-  GlyphArray *ga = GlyphArray_new_from_GlyphArray(glyph_array);
+void apply_chain(const Chain *chain, GlyphArray* glyph_array) {
   for (size_t i = 0; i < chain->lookupCount; i++) {
-    apply_Lookup(chain, chain->lookupsArray[i], ga);
+    apply_Lookup(chain, chain->lookupsArray[i], glyph_array);
   }
-  return ga;
 }
 

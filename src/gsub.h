@@ -1,10 +1,6 @@
-#ifndef GSUB_H
-#define GSUB_H
+#pragma once
 #include <stdint.h>
 #include <stdbool.h>
-
-#include <ft2build.h>
-#include FT_FREETYPE_H
 
 #pragma pack(push, 1)
 
@@ -425,31 +421,11 @@ typedef struct {
 
 /** Custom **/
 
+#include "glypharray.h"
 
-typedef struct Chain Chain;
-typedef struct GlyphArray GlyphArray;
+typedef struct LBT_Chain Chain;
 
-void parse_GSUB(FT_Face face, const char* path);
-
-bool get_required_feature(const FT_Face face, const unsigned char (*script)[4], const unsigned char (*lang)[4], unsigned char (*required_feature)[4]);
-Chain *generate_chain(FT_Face face, const unsigned char (*script)[4], const unsigned char (*lang)[4], const unsigned char (*features)[4], size_t n_features);
+bool get_required_feature(const uint8_t *GSUB_table, const unsigned char (*script)[4], const unsigned char (*lang)[4], unsigned char (*required_feature)[4]);
+Chain *generate_chain(const uint8_t *GSUB_table, const unsigned char (*script)[4], const unsigned char (*lang)[4], const unsigned char (*features)[4], size_t n_features);
 void destroy_chain(Chain *chain);
-GlyphArray *apply_chain(const Chain *chain, const GlyphArray* glyph_array);
-
-GlyphArray *GlyphArray_new(size_t size);
-GlyphArray *GlyphArray_new_from_utf8(FT_Face face, const char *string, size_t len);
-GlyphArray *GlyphArray_new_from_data(uint16_t *data, size_t len);
-const uint16_t* GlyphArray_get(GlyphArray *glyph_array, size_t *length);
-bool GlyphArray_set1(GlyphArray *glyph_array, size_t index, uint16_t data);
-bool GlyphArray_set(GlyphArray *glyph_array, size_t from, const uint16_t *data, size_t data_size);
-bool GlyphArray_append(GlyphArray *glyph_array, const uint16_t *data, size_t data_size);
-bool GlyphArray_put(GlyphArray *dst, size_t dst_index, GlyphArray *src, size_t src_index, size_t len);
-bool GlyphArray_shrink(GlyphArray *glyph_array, size_t reduction);
-bool GlyphArray_compare(GlyphArray *ga1, GlyphArray *ga2);
-void GlyphArray_free(GlyphArray *ga);
-void GlyphArray_print(GlyphArray *ga);
-void GlyphArray_print2(FT_Face face, GlyphArray *ga);
-
-void test_GlyphArray(FT_Face face);
-
-#endif // GSUB_H
+void apply_chain(const Chain *chain, GlyphArray* glyph_array);

@@ -1,0 +1,1 @@
+option('no_freetype', type: 'boolean', value: false, description: 'Build without FreeType support')
