@@ -22,7 +22,7 @@ GlyphArray *GlyphArray_new(size_t size);
 #if !defined(NO_FREETYPE)
 GlyphArray *GlyphArray_new_from_utf8(FT_Face face, const char *string, size_t len);
 #endif
-GlyphArray *GlyphArray_new_from_data(uint16_t *data, size_t len);
+GlyphArray *GlyphArray_new_from_data(const uint16_t *data, size_t len);
 GlyphArray *GlyphArray_new_from_GlyphArray(const GlyphArray *glyph_array);
 const uint16_t* GlyphArray_get(GlyphArray *glyph_array, size_t *length);
 Bloom GlyphArray_get_bloom(const GlyphArray *ga);

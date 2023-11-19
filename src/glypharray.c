@@ -160,7 +160,7 @@ GlyphArray *GlyphArray_new_from_utf8(FT_Face face, const char *string, size_t le
 }
 #endif
 
-GlyphArray *GlyphArray_new_from_data(uint16_t *data, size_t len) {
+GlyphArray *GlyphArray_new_from_data(const uint16_t *data, size_t len) {
   GlyphArray *ga = GlyphArray_new(len);
   if (ga == NULL) return NULL;
   GlyphArray_set(ga, 0, data, len);

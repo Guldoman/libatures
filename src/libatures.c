@@ -78,11 +78,7 @@ void LBT_destroy_chain(LBT_Chain *chain) {
 }
 
 LBT_Glyph* LBT_apply_chain(const LBT_Chain *chain, const LBT_Glyph* glyph_array, size_t n_input_glyphs, size_t *n_output_glyphs) {
-  uint16_t *data = malloc(sizeof(uint16_t) * n_input_glyphs);
-  if (data == NULL) return NULL;
-
-  memcpy(data, glyph_array, n_input_glyphs * sizeof(uint16_t));
-  GlyphArray *ga = GlyphArray_new_from_data(data, n_input_glyphs);
+  GlyphArray *ga = GlyphArray_new_from_data(glyph_array, n_input_glyphs);
 
   apply_chain(chain, ga);
 
