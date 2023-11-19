@@ -1,18 +1,14 @@
 /** \file libatures.h
 */
 #pragma once
-#if defined _WIN32 || defined __CYGWIN__
-  #ifdef BUILDING_LIBATURES
+#ifdef BUILDING_LIBATURES
+  #if defined _WIN32 || defined __CYGWIN__
     #define LIBATURES_PUBLIC __declspec(dllexport)
   #else
-    #define LIBATURES_PUBLIC __declspec(dllimport)
+    #define LIBATURES_PUBLIC __attribute__ ((visibility ("default")))
   #endif
 #else
-  #ifdef BUILDING_LIBATURES
-    #define LIBATURES_PUBLIC __attribute__ ((visibility ("default")))
-  #else
-    #define LIBATURES_PUBLIC
-  #endif
+  #define LIBATURES_PUBLIC
 #endif
 
 #include <stdint.h>

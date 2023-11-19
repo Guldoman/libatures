@@ -5,14 +5,14 @@ if freetype_dep.found() and not get_option('no_tests')
   test_chain_generation = executable('test_chain_generation', 'test_chain_generation.c',
     include_directories: include_directories('../src'),
     dependencies: [freetype_dep],
-    link_with: shlib,
+    link_with: liblib,
     build_by_default: false,
   )
 
   test_substitutions = executable('test_substitutions', 'test_substitutions.c',
     include_directories: include_directories('../src'),
     dependencies: [freetype_dep],
-    link_with: shlib,
+    link_with: liblib,
     build_by_default: false,
   )
 
@@ -24,5 +24,5 @@ if freetype_dep.found() and not get_option('no_tests')
     protocol: 'tap'
   )
 else
-  warning('Testing disabled because freetype wasn\'t found or was disabled')
+  warning('Testing disabled because freetype wasn\'t found, was disabled, or testing was disabled')
 endif
