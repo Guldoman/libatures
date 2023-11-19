@@ -14,7 +14,7 @@ else
   freetype_dep = dependency('freetype2', required: true)
 endif
 
-shlib = shared_library('libatures',
+shlib = library('libatures',
   [
     'src/libatures.c',
     'src/gsub.c',
@@ -30,12 +30,13 @@ subdir('tests')
 
 # Make this library usable as a Meson subproject.
 libatures_dep = declare_dependency(
-  link_with: shlib
+  link_with: shlib,
+  include_directories: ['src']
 )
 
 # Make this library usable from the system's
 # package manager.
-install_headers('src/libatures.h', subdir: 'libatures')
+install_headers('src/libatures.h')
 
 pkg_mod = import('pkgconfig')
 pkg_mod.generate(
