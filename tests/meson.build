@@ -1,4 +1,4 @@
-if freetype_dep.found()
+if freetype_dep.found() and not get_option('no_tests')
   fs = import('fs')
   fonts_deps = fs.copyfile('fonts/JetBrainsMono-Regular.ttf', 'JetBrainsMono-Regular.ttf')
 

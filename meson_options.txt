@@ -1,1 +1,2 @@
 option('no_freetype', type: 'boolean', value: false, description: 'Build without FreeType support')
+option('no_tests', type: 'boolean', value: false, description: 'Avoid building tests')
