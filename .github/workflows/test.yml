@@ -1,0 +1,59 @@
+name: Tests
+
+on:
+  push:
+    branches:
+      - "*"
+
+  pull_request:
+    branches:
+      - "*"
+
+  workflow_dispatch:
+
+jobs:
+  build_linux:
+    name: Linux
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        config:
+          - { name: "GCC", cc: gcc, cxx: g++ }
+          - { name: "clang", cc: clang, cxx: clang++ }
+    env:
+      CC: ${{ matrix.config.cc }}
+      CXX: ${{ matrix.config.cxx }}
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Python Setup
+        uses: actions/setup-python@v5
+
+      - name: Update Packages
+        run: sudo apt-get update
+
+      - name: Install clang
+        if: ${{ matrix.config.name == 'clang' }}
+        run: sudo apt-get install -y clang
+
+      - name: Install meson
+        run: pip install meson ninja
+
+      - name: Install Freetype
+        run: sudo apt install libfreetype-dev
+
+      - name: Build
+        run: |
+          meson setup build
+          meson compile -C build
+
+      - name: Run Tests
+        run: |
+          meson test -C build
+
+      - name: Create test summary
+        uses: test-summary/action@v2
+        with:
+          paths: build/meson-logs/testlog.junit.xml
