@@ -28,7 +28,7 @@ static bool test_generate_chain(void) {
 }
 
 static bool test_generate_chain_good_script(void) {
-  const unsigned char script[4] = {'l', 'a', 't', 'n'};
+  LBT_tag script = LBT_make_tag("latn");
   LBT_Chain *c = LBT_generate_chain(cc, &script, NULL, NULL, 0);
   if (c == NULL) return false;
   LBT_destroy_chain(c);
@@ -36,7 +36,7 @@ static bool test_generate_chain_good_script(void) {
 }
 
 static bool test_generate_chain_bad_script(void) {
-  const unsigned char script[4] = {'A', 'A', 'A', 'A'};
+  LBT_tag script = LBT_make_tag("AAAA");
   LBT_Chain *c = LBT_generate_chain(cc, &script, NULL, NULL, 0);
   if (c == NULL) return true;
   LBT_destroy_chain(c);
@@ -44,7 +44,7 @@ static bool test_generate_chain_bad_script(void) {
 }
 
 static bool test_generate_chain_DFLT_script(void) {
-  const unsigned char script[4] = {'D', 'F', 'L', 'T'};
+  LBT_tag script = LBT_make_tag("DFLT");
   LBT_Chain *c = LBT_generate_chain(cc, &script, NULL, NULL, 0);
   if (c == NULL) return false;
   LBT_destroy_chain(c);
@@ -52,7 +52,7 @@ static bool test_generate_chain_DFLT_script(void) {
 }
 
 static bool test_generate_chain_DFLT_lang(void) {
-  const unsigned char lang[4] = {'D', 'F', 'L', 'T'};
+  LBT_tag lang = LBT_make_tag("DFLT");
   LBT_Chain *c = LBT_generate_chain(cc, NULL, &lang, NULL, 0);
   if (c == NULL) return false;
   LBT_destroy_chain(c);
@@ -60,7 +60,7 @@ static bool test_generate_chain_DFLT_lang(void) {
 }
 
 static bool test_generate_chain_bad_lang(void) {
-  const unsigned char lang[4] = {'A', 'A', 'A', 'A'};
+  LBT_tag lang = LBT_make_tag("AAAA");
   LBT_Chain *c = LBT_generate_chain(cc, NULL, &lang, NULL, 0);
   if (c == NULL) return true;
   LBT_destroy_chain(c);
@@ -68,7 +68,7 @@ static bool test_generate_chain_bad_lang(void) {
 }
 
 static bool test_generate_chain_ccmp_feature(void) {
-  const unsigned char feature[4] = {'c', 'c', 'm', 'p'};
+  LBT_tag feature = LBT_make_tag("ccmp");
   LBT_Chain *c = LBT_generate_chain(cc, NULL, NULL, &feature, 1);
   if (c == NULL) return false;
   LBT_destroy_chain(c);
@@ -76,7 +76,7 @@ static bool test_generate_chain_ccmp_feature(void) {
 }
 
 static bool test_generate_chain_bad_feature(void) {
-  const unsigned char feature[4] = {'A', 'A', 'A', 'A'};
+  LBT_tag feature = LBT_make_tag("AAAA");
   LBT_Chain *c = LBT_generate_chain(cc, NULL, NULL, &feature, 1);
   if (c == NULL) return false;
   LBT_destroy_chain(c);
