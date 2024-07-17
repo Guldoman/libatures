@@ -69,7 +69,7 @@ void LBT_destroy(LBT_ChainCreator* cc) {
   free(cc);
 }
 
-LBT_Chain *LBT_generate_chain(const LBT_ChainCreator *cc, const unsigned char (*script)[4], const unsigned char (*lang)[4], const unsigned char (*features)[4], size_t n_features) {
+LBT_Chain *LBT_generate_chain(const LBT_ChainCreator *cc, LBT_tag *script, LBT_tag *lang, LBT_tag *features, size_t n_features) {
   return generate_chain(cc->GSUB_table, script, lang, features, n_features);
 }
 

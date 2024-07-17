@@ -18,13 +18,13 @@ FT_New_Face(lib, "JetBrainsMono-Regular.ttf", 0, &face);
 
 LBT_ChainCreator *cc = LBT_new(face);
 
-const unsigned char features[][4] = {{'c', 'a', 'l', 't'}, {'c', 'c', 'm', 'p'}};
+LBT_tag features[] = { LBT_make_tag("calt"), LBT_make_tag("ccmp") };
 LBT_Chain *c = LBT_generate_chain(cc, NULL, NULL, features, 2);
 
-const LBT_Glyph str[] = {598, 712}; // "->" in Glyph IDs
+const LBT_Glyph str[] = {855, 1051}; // "->" in Glyph IDs
 size_t out_len;
 LBT_Glyph* ligated = LBT_apply_chain(c, str, 2, &out_len);
 for (size_t i = 0; i < out_len; i++)
   printf("%d ", ligated[i]);
-// Outputs "1166 620" which are the Glyph IDs that result in the → glyph
+// Outputs "1742 881" which are the Glyph IDs that result in the → glyph
 ```

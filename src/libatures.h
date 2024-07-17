@@ -17,6 +17,7 @@
 typedef struct LBT_ChainCreator LBT_ChainCreator;
 typedef struct LBT_Chain LBT_Chain;
 typedef uint16_t LBT_Glyph;
+typedef const unsigned char (LBT_tag)[4];
 
 #if !defined(NO_FREETYPE)
 #include <ft2build.h>
@@ -73,9 +74,9 @@ void LIBATURES_PUBLIC LBT_destroy(LBT_ChainCreator* cc);
  * \param[in] n_features
  */
 LBT_Chain LIBATURES_PUBLIC *LBT_generate_chain(const LBT_ChainCreator *cc,
-                                               const unsigned char (*script)[4],
-                                               const unsigned char (*lang)[4],
-                                               const unsigned char (*features)[4],
+                                               LBT_tag *script,
+                                               LBT_tag *lang,
+                                               LBT_tag *features,
                                                size_t n_features);
 
 /**
@@ -104,3 +105,8 @@ LBT_Glyph LIBATURES_PUBLIC *LBT_apply_chain(const LBT_Chain *chain,
  * \param[in,out] chain
  */
 void LIBATURES_PUBLIC LBT_destroy_chain(LBT_Chain *chain);
+
+/**
+ * \brief Make a tag from a string.
+ */
+#define LBT_make_tag(str) { (str)[0], (str)[1], (str)[2], (str)[3] }
