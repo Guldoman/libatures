@@ -20,91 +20,53 @@ static void teardown(LBT_ChainCreator **cc) {
   *cc = NULL;
 }
 
-static bool test_simple_substitution(void) {
-  const unsigned char features[][4] = {{'c', 'a', 'l', 't'}};
-  bool result = false;
-  LBT_Glyph *original = NULL, *ligated = NULL;
-  LBT_Chain *c = LBT_generate_chain(cc, NULL, NULL, features, 1);
-  if (c == NULL) return false;
-
-  const char* str = "==";
-  
-  original = utf8_to_GlyphID(face, str, strlen(str));
-  if (original == NULL) {
-    goto end;
-  }
-
-  size_t out_len = 0;
-  ligated = LBT_apply_chain(c, original, strlen(str), &out_len);
-  if (ligated == NULL) {
-    goto end;
-  }
-
-  if (out_len != 2) {
-    goto end;
-  }
-
-  LBT_Glyph expected[] = { 1166, 1011 };
-  for (size_t i = 0; i < sizeof(expected)/sizeof(*expected); i++) {
-    if (ligated[i] != expected[i]) {
-      fprintf(stderr, "%ld: %d vs %d\n", i, ligated[i], expected[i]);
-      goto end;
-    }
-  }
-
-  result = true;
-  end:
-  free(ligated);
-  free(original);
-  LBT_destroy_chain(c);
-  return result;
-}
-
-static bool test_no_substitution(void) {
-  bool result = false;
-  LBT_Glyph *original = NULL, *ligated = NULL;
-  LBT_Chain *c = LBT_generate_chain(cc, NULL, NULL, NULL, 0);
-  if (c == NULL) return false;
-
-  const char* str = "==";
-  
-  original = utf8_to_GlyphID(face, str, strlen(str));
-  if (original == NULL) {
-    goto end;
-  }
-
-  size_t out_len = 0;
-  ligated = LBT_apply_chain(c, original, strlen(str), &out_len);
-  if (ligated == NULL) {
-    goto end;
-  }
-
-  if (out_len != 2) {
-    goto end;
-  }
-
-  LBT_Glyph expected[] = { 710, 710 };
-  for (size_t i = 0; i < sizeof(expected)/sizeof(*expected); i++) {
-    if (ligated[i] != expected[i]) {
-      fprintf(stderr, "%ld: %d vs %d\n", i, ligated[i], expected[i]);
-      goto end;
-    }
-  }
-
-  result = true;
-  end:
-  free(ligated);
-  free(original);
-  LBT_destroy_chain(c);
-  return result;
-}
+make_test(no_substitutions,
+  NO_SCRIPT(), NO_LANG(),
+  FEATS(LBT_make_tag("calt")),
+  "hello world",
+  EXPECTED(252, 225, 275, 275, 290, 958, 362, 290, 320, 275, 221)
+)
+make_test(simple_substitution1,
+  NO_SCRIPT(), NO_LANG(),
+  FEATS(LBT_make_tag("calt")),
+  "==",
+  EXPECTED(1742, 1571)
+)
+make_test(simple_substitution2,
+  NO_SCRIPT(), NO_LANG(),
+  FEATS(LBT_make_tag("calt")),
+  "->",
+  EXPECTED(1742,  881)
+)
+make_test(simple_substitution3,
+  NO_SCRIPT(), NO_LANG(),
+  FEATS(LBT_make_tag("calt")),
+  "<-",
+  EXPECTED(1742, 1588)
+)
+make_test(multiple_substitutions1,
+  NO_SCRIPT(), NO_LANG(),
+  FEATS(LBT_make_tag("calt")),
+  "-><-",
+  EXPECTED(1742, 881, 1742, 1588)
+)
+make_test(multiple_substitutions2,
+  NO_SCRIPT(), NO_LANG(),
+  FEATS(LBT_make_tag("calt")),
+  "-><-><==><=><-><--<<-<>",
+  EXPECTED(1742, 881, 1742, 1742, 1591, 1742, 1742, 1742, 1610, 1742, 1742, 1611, 1742, 1742, 1591, 1742, 1742, 1589, 1742, 1742, 1615, 1742, 1613)
+)
 
 static tap_test tests[] = {
-  { "Simple substitution", test_simple_substitution, TAP_RUN },
-  { "No substitution", test_no_substitution, TAP_RUN },
+  { "No substitutions",        test_no_substitutions,        TAP_RUN },
+  { "Simple substitution1",    test_simple_substitution1,    TAP_RUN },
+  { "Simple substitution2",    test_simple_substitution2,    TAP_RUN },
+  { "Simple substitution3",    test_simple_substitution3,    TAP_RUN },
+  { "Multiple substitutions1", test_multiple_substitutions1, TAP_RUN },
+  { "Multiple substitutions2", test_multiple_substitutions2, TAP_RUN },
 };
 
-int main() {
+int main(void) {
   init_freetype(&lib);
   load_font(lib, "tests/JetBrainsMono-Regular.ttf", &face);
 

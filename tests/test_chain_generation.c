@@ -94,7 +94,7 @@ static tap_test tests[] = {
   { "Chain with (bad, acceptable) `AAAA` feature", test_generate_chain_bad_feature, TAP_RUN },
 };
 
-int main() {
+int main(void) {
   init_freetype(&lib);
   load_font(lib, "tests/JetBrainsMono-Regular.ttf", &face);
 
